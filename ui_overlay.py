@@ -1,8 +1,21 @@
 import cv2
 import numpy as np
-import imgui
-from imgui.integrations.opencv import OpenCVRenderer
 import time
+
+# The settings panel is a convenience, not the product — the tracker captures,
+# detects and draws without it. imgui publishes no wheel for Python 3.14 (this
+# Mac's default) and its source build fails, which made `import imgui` here
+# stop main_screen.py from starting at all: the README's headline command died
+# with ModuleNotFoundError before opening a window.
+try:
+    import imgui
+    from imgui.integrations.opencv import OpenCVRenderer
+
+    IMGUI_AVAILABLE = True
+except ImportError:  # pragma: no cover - depends on the interpreter
+    imgui = None
+    OpenCVRenderer = None
+    IMGUI_AVAILABLE = False
 
 
 class OverlayUI:
@@ -372,3 +385,48 @@ class OverlayUI:
     def toggle_help(self):
         """Toggle help overlay visibility."""
         self.show_help = not self.show_help
+
+
+class _NoOverlay:
+    """Stand-in used when imgui is unavailable.
+
+    Presents the same surface main_screen.py calls — draw, toast, show_panel,
+    show_help — so the tracker needs no conditionals and simply runs without a
+    settings panel. Keyboard shortcuts that change settings still work; only
+    the panel that displays them is missing.
+    """
+
+    def __init__(self) -> None:
+        self.show_panel = False
+        self.show_help = False
+        self._warned = False
+
+    def draw(self, frame, *args, **kwargs):
+        return frame
+
+    def toast(self, message: str) -> None:
+        # Toasts are the only feedback for some shortcuts, so without a panel
+        # they go to the terminal rather than vanishing.
+        print(f"[tracker] {message}", flush=True)
+
+    def __getattr__(self, name):
+        # Anything else the UI grows later degrades to a no-op rather than
+        # crashing a run that is otherwise working.
+        def _noop(*args, **kwargs):
+            return None
+
+        return _noop
+
+
+if not IMGUI_AVAILABLE:
+    _RealOverlayUI = OverlayUI
+
+    class OverlayUI(_NoOverlay):  # type: ignore[no-redef]
+        def __init__(self) -> None:
+            super().__init__()
+            print(
+                "[tracker] imgui is not installed, so the TAB settings panel is "
+                "unavailable. Everything else works; `pip install imgui[opencv]` "
+                "to enable it (needs Python <= 3.13).",
+                flush=True,
+            )

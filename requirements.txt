@@ -3,7 +3,6 @@
 mss>=9.0.0
 opencv-python>=4.8.0
 numpy>=1.24.0
-imgui[opencv]>=2.0.0
 
 # TrackNet (--tracknet) and YOLO (--yolo) detection modes. Classic CV mode
 # needs neither, but they are not separated out: both weight files download on
@@ -14,6 +13,12 @@ ultralytics>=8.0.0
 # ---------------------------------------------------------------------------
 # Optional extras, installed separately.
 # ---------------------------------------------------------------------------
+# The TAB settings panel. Publishes no wheel for Python 3.14 and its source
+# build fails there, so it is not a core dependency — the tracker detects and
+# draws without it and says so at startup. On Python <= 3.13:
+#     pip3 install "imgui[opencv]"
+# imgui[opencv]>=2.0.0
+#
 # ~2x faster TrackNet inference on Apple Silicon:
 #     pip3 install mlx
 # mlx>=0.32
