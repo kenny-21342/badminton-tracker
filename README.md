@@ -287,14 +287,18 @@ Press **`d`** to open the debug masks window (frame | white | motion | AND).
 | `mlx_tracknet_detector.py` | MLX-accelerated TrackNet for Apple Silicon |
 | `tracker.py` | Trajectory smoothing, gap-filling, hit detection |
 | `visualizer.py` | Trail, HUD, mini-map, and theme rendering |
-| `ui_overlay.py` | **NEW:** ImGui-based settings overlay panel |
-| `config_manager.py` | **NEW:** Settings persistence system |
-| `session_recorder.py` | **NEW:** Trajectory recording and replay |
+| `ui_overlay.py` | ImGui settings overlay panel (optional — see controls) |
+| `config_manager.py` | Settings persistence |
+| `session_recorder.py` | Session recording, replay and CSV export |
 | `region_selector.py` | Interactive drag-to-select capture region |
 | `extract_frames.py` | Sample frames from video/screen for labeling |
 | `labeler.py` | Interactive labeling tool (drag boxes around shuttle) |
 | `train.py` | Fine-tune YOLOv8 on your labeled frames |
 | `download_tracknet.py` | Download pre-trained TrackNetV2 weights |
+| `export_tracknet_coreml.py` | Export TrackNet to CoreML (needs Python <= 3.13) |
+| `evaluate.py` | Measure detector accuracy against labelled frames |
+| `benchmark.py` | Measure detector speed on synthetic frames |
+| `frame_classifier.py` | Court-view classifier used when sampling frames |
 | `main.py` | Legacy entry point for video files / webcams |
 
 ## How it works
@@ -342,8 +346,31 @@ Press **`d`** to open the debug masks window (frame | white | motion | AND).
   per broadcast.
 - **YOLO**: requires one-time labeling effort (~1 hr for 200 frames). Accuracy
   depends on label quality and dataset diversity.
-- **TrackNet**: at full 512×288 the pre-trained model runs at 4–6 FPS on Apple
-  Silicon; use `--tracknet-input 256x144 --tracknet-fp16` for ~4x speed (some
-  accuracy loss), or process recorded videos offline.
+- **TrackNet**: at full 512×288 the pre-trained model runs at about 13 FPS on
+  an M3 (fp16, MPS), or 41 at `--tracknet-input 256x144 --tracknet-fp16`. Run
+  `python3 benchmark.py` for your own machine. An earlier version of this
+  section said 4–6 FPS, which contradicted the table above it and was wrong.
 - **Hit counting** is heuristic and works best with a stable camera and a
-  clear side-view of the court.
+  clear side-view of the court. Press `SPACE` during replays and adverts:
+  movement on screen is counted as play otherwise.
+
+## What has actually been measured
+
+Worth being straight about, because most of the claims above are impressions
+rather than measurements.
+
+`evaluate.py` has been run against the 1000 labelled frames in `datasets/`.
+Only YOLO can be judged on them, and only on the 200 it did not train on:
+**79.5% recall, 92.5% precision, 2.0 px median error**. Its PCK is identical
+at 8, 25 and 50 px, which is what memorising a training set looks like rather
+than generalising, so treat that figure as untested until it faces unseen
+footage.
+
+Classic CV and TrackNet cannot be judged on that set at all. Both need
+consecutive frames — classic CV compares against the previous one, TrackNet
+reads three at a time — and the set is 1000 sampled frames in 388 runs with a
+median run length of one. Their numbers there measure the dataset, not them.
+
+So **no default detector has been chosen on evidence**. Doing that needs 5–10
+contiguous rallies with ground-truth positions, from footage none of the
+detectors have seen.
