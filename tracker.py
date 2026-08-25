@@ -266,6 +266,20 @@ class TrajectoryTracker:
         # Smoothed: a single noisy detection should not swing the estimate.
         self.gravity_px = self.gravity_px * 0.7 + measured * 0.3
 
+    def end_rally(self):
+        """Close the current rally now, whatever the detector is seeing.
+
+        Used when the operator pauses: whatever is on screen during a replay
+        or an advert is not the rally continuing, and resuming later should
+        not append to it.
+        """
+        if not self.rally_active:
+            return
+        self.rally_active = False
+        if self.rally_count > 0:
+            self.rallies_completed += 1
+            self.rally_lengths.append(self.rally_count)
+
     def _maybe_end_rally(self):
         """Close the rally once the shuttle has been gone long enough.
 

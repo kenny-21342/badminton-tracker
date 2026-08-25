@@ -156,3 +156,33 @@ class PredictedPointTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PauseTests(unittest.TestCase):
+    def test_pausing_closes_the_current_rally(self) -> None:
+        """SPACE means "this is not play any more".
+
+        Without closing it, resuming after a replay or an advert appends the
+        next rally's hits to the previous one's count.
+        """
+        tracker = TrajectoryTracker()
+        tracker.observed_fps = 30.0
+        fly(tracker, (100, 300), (12, -8), 8)
+        fly(tracker, (196, 236), (12, 20), 8)
+        self.assertGreaterEqual(tracker.rally_count, 1)
+
+        tracker.end_rally()
+        self.assertEqual(tracker.rallies_completed, 1)
+
+        # Resuming starts a fresh rally rather than extending the old one.
+        tracker.add_point((500, 500))
+        self.assertEqual(tracker.rally_count, 0)
+
+    def test_ending_a_rally_twice_counts_it_once(self) -> None:
+        tracker = TrajectoryTracker()
+        tracker.observed_fps = 30.0
+        fly(tracker, (100, 300), (12, -8), 8)
+        fly(tracker, (196, 236), (12, 20), 8)
+        tracker.end_rally()
+        tracker.end_rally()
+        self.assertEqual(tracker.rallies_completed, 1)

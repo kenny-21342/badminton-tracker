@@ -115,7 +115,7 @@ class TrajectoryVisualizer:
 
     # ------------------------------------------------------------------- HUD
     def draw_info(self, frame, trajectory_length, fps=0, rally=0, hits=0,
-                  speed=0.0, extra=""):
+                  speed=0.0, extra="", rallies=None, paused=False):
         if not self.show_hud:
             return frame
 
@@ -125,8 +125,16 @@ class TrajectoryVisualizer:
         cv2.rectangle(frame, (0, 0), (w, 54), self.theme["hud_bg"], -1)
         cv2.rectangle(frame, (0, 54), (w, 56), self.theme["hud_line"], -1)
 
-        info = (f"Rally: {rally}   Hits: {hits}   "
+        # "Rally: n" used to mean hits since the counter was last reset, which
+        # read as a count of rallies. The two are now labelled for what they
+        # are: hits in the rally being played, and rallies finished.
+        rally_field = f"Rally: {rally} hits"
+        if rallies is not None:
+            rally_field += f" (#{rallies + 1})"
+        info = (f"{rally_field}   Total: {hits}   "
                 f"Speed: {speed:4.1f}   FPS: {fps:4.1f}   Pts: {trajectory_length}")
+        if paused:
+            info = "[PAUSED]   " + info
         cv2.putText(frame, info, (12, 36), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
                     self.theme["text"], 2)
 

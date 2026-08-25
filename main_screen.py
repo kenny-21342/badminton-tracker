@@ -215,8 +215,8 @@ def main():
     print("=" * 55)
     print(f"Capture: {w}x{h}  |  detector: {mode}  "
           f"|  preview scale: {disp_scale:.2f}")
-    print("Controls: c=clear  r=reset rally  m=minimap  s=smooth  "
-          "+/-=bright  [/]=motion/conf  q=quit")
+    print("Controls: SPACE=pause  v=record session  c=clear  r=reset rally  "
+          "m=minimap  s=smooth  +/-=bright  [/]=motion/conf  q=quit")
     print("=" * 55)
 
     fps_t0 = time.time()
@@ -225,6 +225,7 @@ def main():
     show_hud = True
     show_minimap = True
     show_debug = False
+    paused = False
 
     try:
         while True:
@@ -233,7 +234,13 @@ def main():
             frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
 
             # --- Detect ---------------------------------------------------
-            if mode == "classic":
+            if paused:
+                # Keep capturing and drawing so the window stays live, but do
+                # not detect: nothing on screen during a replay or an advert
+                # should reach the trajectory or the hit count.
+                det = det_full = None
+                det_source = "paused"
+            elif mode == "classic":
                 det = detector.detect(frame)
                 det_full = None
                 if det is not None:
@@ -244,7 +251,8 @@ def main():
                 det_full, det_source = detector.detect(frame)
                 det = det_full  # tracker works in full-frame space
 
-            tracker.add_point(det, frame=frame)
+            if not paused:
+                tracker.add_point(det, frame=frame)
 
             # Map trajectory for drawing.
             if mode == "classic":
@@ -275,7 +283,8 @@ def main():
                 frame = visualizer.draw_info(
                     frame, len(traj), fps, rally=tracker.rally_count,
                     hits=tracker.hit_count, speed=tracker.current_speed(),
-                    extra=extra)
+                    extra=extra, rallies=tracker.rallies_completed,
+                    paused=paused)
 
             # --- Session recording ---------------------------------------
             # SessionRecorder was constructed and handed to the overlay, but
@@ -352,6 +361,18 @@ def main():
                 tracker.smoothing = 0.2 if tracker.smoothing > 0.4 else 0.6
                 ui.toast(f"Smoothing: {tracker.smoothing:.2f}")
                 print(f"[smoothing = {tracker.smoothing}]")
+            elif key == ord(" "):
+                # Pause tracking without closing the window — for replays,
+                # adverts and the gaps between games, where whatever is on
+                # screen is not a rally and would otherwise be tracked and
+                # counted as one.
+                paused = not paused
+                if paused:
+                    # Whatever follows is not this rally continuing, and the
+                    # old trail would smear into play when it resumes.
+                    tracker.end_rally()
+                    tracker.clear_trajectory()
+                ui.toast("Paused" if paused else "Resumed")
             elif key == ord("v"):
                 if recorder.is_recording:
                     saved = recorder.stop_recording(tracker)

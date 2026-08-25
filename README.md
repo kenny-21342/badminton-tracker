@@ -199,6 +199,7 @@ python3 main_screen.py --tracknet --tracknet-input 256x144 --tracknet-fp16  # Tr
 
 | Key | Action | Mode |
 |-----|--------|------|
+| `SPACE` | **Pause / resume tracking** (for replays, adverts, between games) | all |
 | `TAB` | **Toggle settings overlay panel** (needs imgui — see below) | all |
 | `?` | **Toggle help screen** | all |
 | `c` | Clear the trajectory (new rally) | all |
@@ -219,6 +220,10 @@ fails to build from source there. Without it the tracker runs normally, says so
 at startup, and prints the messages the panel would have shown; every shortcut
 above still works. On Python 3.13 or older, `pip3 install "imgui[opencv]"`
 enables the panel.
+
+Pausing stops detection while the window stays live, closes the current rally
+and clears the trail, so a replay is not tracked and its movement is not
+counted as play.
 
 Pressing `v` records the whole session — per-frame position, velocity and
 speed, plus hit counts and the length of every rally — to a timestamped JSON
