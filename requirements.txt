@@ -1,10 +1,26 @@
+# Core runtime. Everything the tracker needs to capture the screen, detect the
+# shuttlecock and draw the overlay.
 mss>=9.0.0
 opencv-python>=4.8.0
 numpy>=1.24.0
-pillow>=10.0.0
-ultralytics>=8.0.0
-polars>=1.0.0
 imgui[opencv]>=2.0.0
-torch>=2.0.0  # For TrackNet
-# Optional: ~2x faster TrackNet inference on Apple Silicon
+
+# TrackNet (--tracknet) and YOLO (--yolo) detection modes. Classic CV mode
+# needs neither, but they are not separated out: both weight files download on
+# demand and the modes are the reason to use this at all.
+torch>=2.0.0
+ultralytics>=8.0.0
+
+# ---------------------------------------------------------------------------
+# Optional extras, installed separately.
+# ---------------------------------------------------------------------------
+# ~2x faster TrackNet inference on Apple Silicon:
+#     pip3 install mlx
 # mlx>=0.32
+#
+# CoreML export (export_tracknet_coreml.py). Kept out of the main list because
+# coremltools ships compiled binaries for Python <= 3.13, and this Mac's
+# default interpreter is 3.14 — installing it here would break the install for
+# everyone else. Run that script under a 3.12/3.13 interpreter:
+#     python3.12 -m pip install coremltools torch
+# coremltools>=8.0
