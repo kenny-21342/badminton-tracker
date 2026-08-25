@@ -1,0 +1,254 @@
+import math
+import numpy as np
+from collections import deque
+
+
+class TrajectoryTracker:
+    """
+    Maintains the shuttlecock trajectory and provides:
+      * smoothing (one-step velocity prediction + residual correction)
+      * velocity-aware gap filling (when a frame has no detection)
+      * hit detection (sharp direction reversal OR big speed change)
+      * rally counting
+      * out-of-frame freeze: when the shuttle leaves the frame, the trail
+        is frozen (not extrapolated into empty space). When it reappears,
+        tracking resumes.
+      * camera-cut detection: when the scene changes abruptly (director
+        switches camera), the trail is auto-cleared so a stale path from
+        the previous angle doesn't linger.
+
+    All coordinates are in the space the detector emits (downscaled for
+    classic CV, full-frame for YOLO).
+    """
+
+    def __init__(self, max_trajectory_length=60, hit_detection_threshold=25,
+                 smoothing=0.5, cut_threshold=40.0):
+        self.trajectory = deque(maxlen=max_trajectory_length)
+        self.velocities = deque(maxlen=max_trajectory_length)
+        self.hit_detection_threshold = hit_detection_threshold
+        self.smoothing = smoothing  # 0 = trust detection, 1 = trust prediction
+        self.no_detection_count = 0
+        self.max_no_detection = 12   # frames to keep predicting before giving up
+        self.last_velocity = (0.0, 0.0)
+        self.last_smoothed = None    # last smoothed position
+        self.rally_count = 0
+        self.hit_count = 0
+        self.cooldown = 0            # frames to wait after a hit
+
+        # Out-of-frame handling.
+        self.frame_width = None
+        self.frame_height = None
+        self.edge_margin = 10        # px tolerance for "near edge"
+        self.out_of_frame = False    # shuttle has left the visible area
+
+        # Camera-cut detection.
+        self.cut_threshold = cut_threshold  # mean-frame-diff that signals a cut
+        self._prev_thumb = None       # previous frame thumbnail for diffing
+
+    # ------------------------------------------------------------- public API
+    def set_frame_size(self, width, height):
+        self.frame_width = width
+        self.frame_height = height
+
+    def _is_near_edge(self, point):
+        """True if the shuttle is near or beyond the frame border."""
+        if self.frame_width is None or self.frame_height is None:
+            return False
+        m = self.edge_margin
+        x, y = point
+        return (x < m or x >= self.frame_width - m or
+                y < m or y >= self.frame_height - m)
+
+    def _is_off_frame(self, point):
+        """True if the predicted position is outside the frame."""
+        if self.frame_width is None or self.frame_height is None:
+            return False
+        x, y = point
+        return (x < 0 or x >= self.frame_width or
+                y < 0 or y >= self.frame_height)
+
+    def check_camera_cut(self, frame):
+        """
+        Detect an abrupt scene change (camera switch, replay transition).
+        Uses a tiny grayscale thumbnail mean-absolute-difference. Returns
+        True if the frame looks like a cut from the previous one.
+        """
+        thumb = cv2_resize_gray(frame, 32)
+        if self._prev_thumb is None:
+            self._prev_thumb = thumb
+            return False
+        diff = float(np.mean(np.abs(thumb.astype(np.int16) -
+                                     self._prev_thumb.astype(np.int16))))
+        self._prev_thumb = thumb
+        return diff > self.cut_threshold
+
+    def add_point(self, point, frame=None):
+        """
+        Add a detected point (or None). Returns True if a hit was detected.
+
+        Args:
+            point: (x, y) or None.
+            frame: the current video frame (for camera-cut detection).
+                   Pass None to skip cut detection.
+
+        On gaps (point is None), we predict forward to bridge short gaps
+        — UNLESS the shuttle was near the frame edge (out of frame), in
+        which case we freeze the trail until it reappears.
+        """
+        # Camera-cut detection: auto-clear on scene change.
+        if frame is not None and self.check_camera_cut(frame):
+            if len(self.trajectory) > 3:
+                self.clear_trajectory()
+                return False
+
+        if point is None:
+            self.no_detection_count += 1
+
+            # Predict where the shuttle would be next frame.
+            predicted = None
+            if (self.last_smoothed is not None
+                    and self.last_velocity != (0.0, 0.0)):
+                predicted = (self.last_smoothed[0] + self.last_velocity[0],
+                             self.last_smoothed[1] + self.last_velocity[1])
+
+            # If the predicted position is off-frame, the shuttle has left
+            # the visible area. Freeze the trail — don't coast into space.
+            if predicted is not None and self._is_off_frame(predicted):
+                self.out_of_frame = True
+                return False
+
+            # If it was already out of frame, stay frozen.
+            if self.out_of_frame:
+                return False
+
+            # Normal gap (occlusion, blur): predict forward to bridge it.
+            if (self.no_detection_count <= self.max_no_detection
+                    and predicted is not None):
+                self._append_smoothed(predicted, predicted, is_predicted=True)
+            # Gap too big: stop extending but preserve existing trail.
+            return False
+
+        # We have a real detection.
+        # Check if it re-entered from off-frame.
+        if self.out_of_frame:
+            self.out_of_frame = False
+            # Reset velocity so we don't smear from the old off-frame position.
+            self.last_velocity = (0.0, 0.0)
+
+        # Check if it's now near the edge → mark as potentially leaving.
+        if self._is_near_edge(point):
+            self.out_of_frame = True
+
+        self.no_detection_count = 0
+        if self.last_smoothed is None:
+            smoothed = point
+            vel = (0.0, 0.0)
+        else:
+            predicted = (
+                self.last_smoothed[0] + self.last_velocity[0],
+                self.last_smoothed[1] + self.last_velocity[1],
+            )
+            s = self.smoothing
+            smoothed = (
+                predicted[0] * s + point[0] * (1 - s),
+                predicted[1] * s + point[1] * (1 - s),
+            )
+            vel = (smoothed[0] - self.last_smoothed[0],
+                   smoothed[1] - self.last_smoothed[1])
+
+        hit = self._append_smoothed(smoothed, point, is_predicted=False, vel=vel)
+        return hit
+
+    # ------------------------------------------------------------- internals
+    def _append_smoothed(self, smoothed, raw, is_predicted, vel=None):
+        pt = (int(smoothed[0]), int(smoothed[1]))
+        self.trajectory.append(pt)
+        self.last_smoothed = (smoothed[0], smoothed[1])
+
+        if vel is None:
+            if len(self.trajectory) >= 2:
+                a, b = self.trajectory[-2], self.trajectory[-1]
+                vel = (float(b[0] - a[0]), float(b[1] - a[1]))
+            else:
+                vel = (0.0, 0.0)
+        self.velocities.append(vel)
+        self.last_velocity = vel
+
+        if self.cooldown > 0:
+            self.cooldown -= 1
+
+        if not is_predicted and self.cooldown == 0 and len(self.trajectory) >= 6:
+            if self._detect_hit():
+                self.hit_count += 1
+                self.rally_count += 1
+                self.cooldown = 12  # avoid double-triggering
+                return True
+        return False
+
+    def _detect_hit(self):
+        """
+        A hit = sharp reversal in vertical OR horizontal velocity, or a large
+        deceleration. We compare the mean velocity of the last few points
+        against the mean of the few before them.
+        """
+        pts = list(self.trajectory)
+        n = len(pts)
+        if n < 6:
+            return False
+
+        recent = pts[-3:]
+        prior = pts[-6:-3]
+
+        def mean_vel(seg):
+            dxs, dys = [], []
+            for i in range(len(seg) - 1):
+                dxs.append(seg[i + 1][0] - seg[i][0])
+                dys.append(seg[i + 1][1] - seg[i][1])
+            return (sum(dxs) / max(len(dxs), 1), sum(dys) / max(len(dys), 1))
+
+        v1 = mean_vel(prior)   # older segment
+        v2 = mean_vel(recent)  # newer segment
+
+        speed1 = math.hypot(*v1)
+        speed2 = math.hypot(*v2)
+
+        # Reversal of vertical direction (most common badminton hit signature)
+        if v1[1] * v2[1] < 0 and abs(v1[1] - v2[1]) > self.hit_detection_threshold:
+            return True
+        # Reversal of horizontal direction
+        if v1[0] * v2[0] < 0 and abs(v1[0] - v2[0]) > self.hit_detection_threshold:
+            return True
+        # Big deceleration (net shot / drop)
+        if speed1 > self.hit_detection_threshold and speed2 < speed1 * 0.25:
+            return True
+        return False
+
+    # ------------------------------------------------------------- utilities
+    def clear_trajectory(self):
+        self.trajectory.clear()
+        self.velocities.clear()
+        self.last_velocity = (0.0, 0.0)
+        self.last_smoothed = None
+        self.no_detection_count = 0
+        self.cooldown = 0
+        self.out_of_frame = False
+
+    def reset_rally(self):
+        self.rally_count = 0
+
+    def get_trajectory(self):
+        return list(self.trajectory)
+
+    def get_velocities(self):
+        return list(self.velocities)
+
+    def current_speed(self):
+        return math.hypot(*self.last_velocity) if self.last_velocity else 0.0
+
+
+# --------------------------------------------------------------- module helpers
+def cv2_resize_gray(frame, size=32):
+    """Downscale a frame to a tiny grayscale thumbnail for fast comparison."""
+    import cv2
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    return cv2.resize(gray, (size, size), interpolation=cv2.INTER_AREA)

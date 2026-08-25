@@ -1,0 +1,20 @@
+# Model weights. Fetched by download_tracknet.py (TrackNet, ~130 MB) or by
+# ultralytics on first use (yolov8n.pt, 6 MB) — large, binary, and
+# reproducible from their release URLs, so not committed.
+models/
+*.pt
+
+# Training output and labelled footage (~307 MB combined). Regenerable, and
+# the clips are not ours to redistribute.
+datasets/
+runs/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# macOS
+.DS_Store

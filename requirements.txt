@@ -1,0 +1,10 @@
+mss>=9.0.0
+opencv-python>=4.8.0
+numpy>=1.24.0
+pillow>=10.0.0
+ultralytics>=8.0.0
+polars>=1.0.0
+imgui[opencv]>=2.0.0
+torch>=2.0.0  # For TrackNet
+# Optional: ~2x faster TrackNet inference on Apple Silicon
+# mlx>=0.32
