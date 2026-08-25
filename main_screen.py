@@ -299,6 +299,12 @@ def main():
                 fps = fps_n / (time.time() - fps_t0)
                 fps_t0 = time.time()
                 fps_n = 0
+                # Hit detection compares pixels-per-frame velocities, and this
+                # pipeline runs anywhere from ~2 fps to ~170 depending on the
+                # detector. Telling the tracker the real rate keeps a hit the
+                # same physical event instead of a function of the frame rate.
+                if fps > 0:
+                    tracker.observed_fps = fps
 
             # --- Keyboard ------------------------------------------------
             key = cv2.waitKey(1) & 0xFF

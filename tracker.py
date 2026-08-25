@@ -24,6 +24,7 @@ class TrajectoryTracker:
     def __init__(self, max_trajectory_length=60, hit_detection_threshold=25,
                  smoothing=0.5, cut_threshold=40.0):
         self.trajectory = deque(maxlen=max_trajectory_length)
+        self.point_is_predicted = deque(maxlen=max_trajectory_length)
         self.velocities = deque(maxlen=max_trajectory_length)
         self.hit_detection_threshold = hit_detection_threshold
         self.smoothing = smoothing  # 0 = trust detection, 1 = trust prediction
@@ -31,9 +32,28 @@ class TrajectoryTracker:
         self.max_no_detection = 12   # frames to keep predicting before giving up
         self.last_velocity = (0.0, 0.0)
         self.last_smoothed = None    # last smoothed position
-        self.rally_count = 0
-        self.hit_count = 0
+        self.rally_count = 0         # hits in the current rally
+        self.hit_count = 0           # hits this session
         self.cooldown = 0            # frames to wait after a hit
+
+        # Rallies. A rally ends when the shuttle stays gone long enough that
+        # the point must be over, and the next detection begins the next one.
+        # Previously "rally" was incremented on the same line as hit_count and
+        # only differed because a keypress zeroed it, so the HUD's "rally"
+        # field was really "hits since you last pressed R".
+        self.rallies_completed = 0
+        self.rally_lengths = []      # hits per completed rally
+        self.rally_active = False
+
+        # Hit detection compares velocities in pixels per frame, so the same
+        # stroke reads differently at 12 fps than at 40 — and this pipeline
+        # ranges from ~2 fps (TrackNet on CPU) to ~170 (classic CV). The
+        # threshold is therefore scaled against a reference rate, and the
+        # cooldown and gap limits are held in seconds rather than frames.
+        self.reference_fps = 30.0
+        self.observed_fps = 30.0
+        self.hit_cooldown_seconds = 0.4
+        self.max_no_detection_seconds = 0.4
 
         # Out-of-frame handling.
         self.frame_width = None
@@ -103,6 +123,7 @@ class TrajectoryTracker:
 
         if point is None:
             self.no_detection_count += 1
+            self._maybe_end_rally()
 
             # Predict where the shuttle would be next frame.
             predicted = None
@@ -140,6 +161,10 @@ class TrajectoryTracker:
             self.out_of_frame = True
 
         self.no_detection_count = 0
+        if not self.rally_active:
+            # First sight of the shuttle since the last rally ended.
+            self.rally_active = True
+            self.rally_count = 0
         if self.last_smoothed is None:
             smoothed = point
             vel = (0.0, 0.0)
@@ -163,6 +188,10 @@ class TrajectoryTracker:
     def _append_smoothed(self, smoothed, raw, is_predicted, vel=None):
         pt = (int(smoothed[0]), int(smoothed[1]))
         self.trajectory.append(pt)
+        # A predicted point is the motion model talking to itself. Feeding it
+        # back into hit detection lets the tracker invent a direction reversal
+        # it never saw, so the flags are kept and the test skips over them.
+        self.point_is_predicted.append(bool(is_predicted))
         self.last_smoothed = (smoothed[0], smoothed[1])
 
         if vel is None:
@@ -181,9 +210,28 @@ class TrajectoryTracker:
             if self._detect_hit():
                 self.hit_count += 1
                 self.rally_count += 1
-                self.cooldown = 12  # avoid double-triggering
+                self.cooldown = max(1, round(self.hit_cooldown_seconds
+                                             * self.observed_fps))
                 return True
         return False
+
+    def _maybe_end_rally(self):
+        """Close the rally once the shuttle has been gone long enough.
+
+        The shuttle vanishing for a moment is an occlusion; vanishing for
+        longer means the point is over. The same limit already governs how
+        long the tracker will keep predicting forward.
+        """
+        if not self.rally_active:
+            return
+        limit = max(1, round(self.max_no_detection_seconds * self.observed_fps))
+        if self.no_detection_count <= limit:
+            return
+        self.rally_active = False
+        if self.rally_count > 0:
+            self.rallies_completed += 1
+            self.rally_lengths.append(self.rally_count)
+
 
     def _detect_hit(self):
         """
@@ -191,7 +239,15 @@ class TrajectoryTracker:
         deceleration. We compare the mean velocity of the last few points
         against the mean of the few before them.
         """
-        pts = list(self.trajectory)
+        # Only real detections. A predicted point is an extrapolation of the
+        # last velocity, so a segment containing one always agrees with the
+        # motion model and can hide a genuine reversal — or, after a bad
+        # prediction, manufacture one.
+        pts = [
+            point
+            for point, predicted in zip(self.trajectory, self.point_is_predicted)
+            if not predicted
+        ]
         n = len(pts)
         if n < 6:
             return False
@@ -212,20 +268,29 @@ class TrajectoryTracker:
         speed1 = math.hypot(*v1)
         speed2 = math.hypot(*v2)
 
+        # These velocities are pixels per frame, so at 12 fps the shuttle moves
+        # two and a half times as far between samples as at 30 for the same
+        # stroke. Scaling the threshold keeps a hit the same physical event
+        # whichever detector is running.
+        threshold = self.hit_detection_threshold * (
+            self.reference_fps / max(self.observed_fps, 1.0)
+        )
+
         # Reversal of vertical direction (most common badminton hit signature)
-        if v1[1] * v2[1] < 0 and abs(v1[1] - v2[1]) > self.hit_detection_threshold:
+        if v1[1] * v2[1] < 0 and abs(v1[1] - v2[1]) > threshold:
             return True
         # Reversal of horizontal direction
-        if v1[0] * v2[0] < 0 and abs(v1[0] - v2[0]) > self.hit_detection_threshold:
+        if v1[0] * v2[0] < 0 and abs(v1[0] - v2[0]) > threshold:
             return True
         # Big deceleration (net shot / drop)
-        if speed1 > self.hit_detection_threshold and speed2 < speed1 * 0.25:
+        if speed1 > threshold and speed2 < speed1 * 0.25:
             return True
         return False
 
     # ------------------------------------------------------------- utilities
     def clear_trajectory(self):
         self.trajectory.clear()
+        self.point_is_predicted.clear()
         self.velocities.clear()
         self.last_velocity = (0.0, 0.0)
         self.last_smoothed = None
