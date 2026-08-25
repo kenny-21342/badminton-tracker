@@ -40,15 +40,29 @@ class SessionRecorder:
             "duration_seconds": 0,
             "hits": 0,
             "rally_count": 0,
+            # Filled in at stop from the tracker: one entry per completed
+            # rally. This is the part a player actually reads — how long the
+            # rallies were — and it needs the whole session to be known.
+            "rallies_completed": 0,
+            "rally_lengths": [],
             "frames": []
         }
 
-    def stop_recording(self):
-        """Stop recording and save to disk."""
+    def stop_recording(self, tracker=None):
+        """Stop recording and save to disk.
+
+        ``tracker`` supplies the rally summary, which only exists once the
+        session is over.
+        """
         if not self.is_recording:
             return None
 
         self.is_recording = False
+        if tracker is not None:
+            self.session_data["rallies_completed"] = getattr(
+                tracker, "rallies_completed", 0)
+            self.session_data["rally_lengths"] = list(
+                getattr(tracker, "rally_lengths", []))
 
         # Calculate duration
         self.session_data["duration_seconds"] = time.time() - self.start_time

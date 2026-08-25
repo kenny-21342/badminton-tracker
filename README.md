@@ -195,19 +195,31 @@ python3 main_screen.py --tracknet --tracknet-input 256x144 --tracknet-fp16  # Tr
 
 | Key | Action | Mode |
 |-----|--------|------|
-| `TAB` | **Toggle settings overlay panel** | all |
+| `TAB` | **Toggle settings overlay panel** (needs imgui — see below) | all |
 | `?` | **Toggle help screen** | all |
 | `c` | Clear the trajectory (new rally) | all |
 | `r` | Reset the rally counter to 0 | all |
 | `m` | Toggle the mini-map | all |
 | `h` | Toggle the HUD bars | all |
 | `s` | Toggle smoothing level (0.2 / 0.6) | all |
+| `v` | **Start / stop recording the session** (writes JSON to `sessions/`) | all |
 | `d` | Toggle debug masks view | classic |
 | `+` / `-` | Brightness threshold up / down | classic |
 | `[` / `]` | Motion threshold / detector confidence (YOLO & TrackNet) | all |
 | `w` / `e` | Saturation down / up | classic |
 | `,` / `.` | Smoothing down / up (fine) | all |
 | `q` | Quit | all |
+
+The settings panel needs `imgui`, which publishes no wheel for Python 3.14 and
+fails to build from source there. Without it the tracker runs normally, says so
+at startup, and prints the messages the panel would have shown; every shortcut
+above still works. On Python 3.13 or older, `pip3 install "imgui[opencv]"`
+enables the panel.
+
+Pressing `v` records the whole session — per-frame position, velocity and
+speed, plus hit counts and the length of every rally — to a timestamped JSON
+file under `sessions/`. Recording also stops and saves on quit, including on
+Ctrl-C. `SessionRecorder.export_to_csv` converts one to CSV.
 
 ### New: Settings Overlay Panel (Press TAB)
 

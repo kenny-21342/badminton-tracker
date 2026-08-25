@@ -277,6 +277,20 @@ def main():
                     hits=tracker.hit_count, speed=tracker.current_speed(),
                     extra=extra)
 
+            # --- Session recording ---------------------------------------
+            # SessionRecorder was constructed and handed to the overlay, but
+            # nothing ever called start_recording, record_frame or
+            # stop_recording — the class was complete and never driven, so no
+            # session was ever written. Toggled with V.
+            if recorder.is_recording:
+                recorder.record_frame(
+                    traj[-1] if traj else None,
+                    tracker.last_velocity,
+                    tracker.current_speed(),
+                    tracker.hit_count,
+                    tracker.rally_count,
+                )
+
             # --- UI Overlay (ImGui panel) --------------------------------
             frame = ui.draw(frame, detector, tracker, visualizer, recorder, mode)
 
@@ -338,6 +352,16 @@ def main():
                 tracker.smoothing = 0.2 if tracker.smoothing > 0.4 else 0.6
                 ui.toast(f"Smoothing: {tracker.smoothing:.2f}")
                 print(f"[smoothing = {tracker.smoothing}]")
+            elif key == ord("v"):
+                if recorder.is_recording:
+                    saved = recorder.stop_recording(tracker)
+                    ui.toast(f"Session saved: {saved.name}" if saved
+                             else "Session save failed")
+                    if saved:
+                        print(f"[tracker] session written to {saved}", flush=True)
+                else:
+                    recorder.start_recording(mode)
+                    ui.toast("Recording session…")
             elif key == ord("d"):
                 show_debug = not show_debug
                 if mode == "classic":
@@ -397,10 +421,23 @@ def main():
         config.set("trail_opacity", visualizer.trail_opacity)
         config.save()
 
+        # A session still recording at exit would otherwise be thrown away,
+        # including on Ctrl-C.
+        if recorder.is_recording:
+            saved = recorder.stop_recording(tracker)
+            if saved:
+                print(f"[tracker] session written to {saved}")
+
         cv2.destroyAllWindows()
-        print("\nTracker stopped. "
-              f"Total hits this session: {tracker.hit_count}, "
-              f"final rally: {tracker.rally_count}.")
+        rallies = tracker.rallies_completed
+        summary = (f"\nTracker stopped. "
+                   f"Total hits this session: {tracker.hit_count}, "
+                   f"rallies: {rallies}")
+        if tracker.rally_lengths:
+            longest = max(tracker.rally_lengths)
+            mean = sum(tracker.rally_lengths) / len(tracker.rally_lengths)
+            summary += f", longest {longest} hits, mean {mean:.1f}"
+        print(summary + ".")
 
 
 def _build_hud(detector, tracker, mode, det_source, fps):
