@@ -30,6 +30,10 @@ project. Direct link:
 If the download fails, open that link in your browser and save the file as
 `models/TrackNet_best.pt`, then run `python3 main_screen.py --tracknet`.
 
+Run `python3 benchmark.py` to measure these on your own machine. It feeds
+synthetic frames straight to each detector, so the figures are upper bounds
+with no capture or drawing in the way.
+
 ### TrackNet performance tips
 
 Measured on an Apple M3 (10-core GPU), full pipeline including screen
