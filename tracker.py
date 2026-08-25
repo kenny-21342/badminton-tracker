@@ -50,6 +50,15 @@ class TrajectoryTracker:
         # ranges from ~2 fps (TrackNet on CPU) to ~170 (classic CV). The
         # threshold is therefore scaled against a reference rate, and the
         # cooldown and gap limits are held in seconds rather than frames.
+        # Vertical acceleration, px/frame^2, estimated from real detections.
+        # yolo_detector already had this and a parabolic predictor whose
+        # docstring called it "what makes the gap-fill follow cross-court
+        # smashes instead of predicting straight lines" — but that function was
+        # never called, and gap-filling happens here, for every detector. So a
+        # shuttle that vanished mid-flight was coasted along a straight line
+        # while the real one was falling away from it.
+        self.gravity_px = 0.0
+
         self.reference_fps = 30.0
         self.observed_fps = 30.0
         self.hit_cooldown_seconds = 0.4
@@ -129,8 +138,8 @@ class TrajectoryTracker:
             predicted = None
             if (self.last_smoothed is not None
                     and self.last_velocity != (0.0, 0.0)):
-                predicted = (self.last_smoothed[0] + self.last_velocity[0],
-                             self.last_smoothed[1] + self.last_velocity[1])
+                predicted, predicted_velocity = self._predict_from(
+                    self.last_smoothed, self.last_velocity)
 
             # If the predicted position is off-frame, the shuttle has left
             # the visible area. Freeze the trail — don't coast into space.
@@ -145,7 +154,8 @@ class TrajectoryTracker:
             # Normal gap (occlusion, blur): predict forward to bridge it.
             if (self.no_detection_count <= self.max_no_detection
                     and predicted is not None):
-                self._append_smoothed(predicted, predicted, is_predicted=True)
+                self._append_smoothed(predicted, predicted, is_predicted=True,
+                                      vel=predicted_velocity)
             # Gap too big: stop extending but preserve existing trail.
             return False
 
@@ -169,10 +179,8 @@ class TrajectoryTracker:
             smoothed = point
             vel = (0.0, 0.0)
         else:
-            predicted = (
-                self.last_smoothed[0] + self.last_velocity[0],
-                self.last_smoothed[1] + self.last_velocity[1],
-            )
+            predicted, _ = self._predict_from(self.last_smoothed,
+                                              self.last_velocity)
             s = self.smoothing
             smoothed = (
                 predicted[0] * s + point[0] * (1 - s),
@@ -202,6 +210,8 @@ class TrajectoryTracker:
                 vel = (0.0, 0.0)
         self.velocities.append(vel)
         self.last_velocity = vel
+        if not is_predicted:
+            self._estimate_gravity()
 
         if self.cooldown > 0:
             self.cooldown -= 1
@@ -214,6 +224,47 @@ class TrajectoryTracker:
                                              * self.observed_fps))
                 return True
         return False
+
+    def _predict_from(self, position, velocity):
+        """One step of a parabola, returning the new position and velocity.
+
+        Both are returned because deriving the velocity back out of the
+        positions double-counts the acceleration: the step already contains
+        half of it, so adding a full g again over-accelerates by g/2 every
+        frame and compounds over a gap.
+
+            y' = y + v + g/2      v' = v + g
+        """
+        new_velocity = (velocity[0], velocity[1] + self.gravity_px)
+        new_position = (
+            position[0] + velocity[0],
+            position[1] + velocity[1] + 0.5 * self.gravity_px,
+        )
+        return new_position, new_velocity
+
+    def _estimate_gravity(self):
+        """Second derivative of vertical position over recent real points.
+
+        Predicted points are excluded: they were produced by this estimate, so
+        including them would feed it back into itself and drift.
+        """
+        real = [
+            point
+            for point, predicted in zip(self.trajectory, self.point_is_predicted)
+            if not predicted
+        ]
+        if len(real) < 5:
+            return
+        recent = real[-5:]
+        velocities = [recent[i + 1][1] - recent[i][1] for i in range(len(recent) - 1)]
+        accelerations = [
+            velocities[i + 1] - velocities[i] for i in range(len(velocities) - 1)
+        ]
+        if not accelerations:
+            return
+        measured = sum(accelerations) / len(accelerations)
+        # Smoothed: a single noisy detection should not swing the estimate.
+        self.gravity_px = self.gravity_px * 0.7 + measured * 0.3
 
     def _maybe_end_rally(self):
         """Close the rally once the shuttle has been gone long enough.
@@ -291,6 +342,7 @@ class TrajectoryTracker:
     def clear_trajectory(self):
         self.trajectory.clear()
         self.point_is_predicted.clear()
+        self.gravity_px = 0.0
         self.velocities.clear()
         self.last_velocity = (0.0, 0.0)
         self.last_smoothed = None
