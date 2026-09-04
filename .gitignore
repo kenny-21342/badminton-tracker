@@ -18,3 +18,10 @@ venv/
 
 # macOS
 .DS_Store
+
+# Match footage dropped in the repo root for a one-off analysis run. Large
+# (hundreds of MB each), and broadcast video is not ours to redistribute --
+# same reason datasets/ is ignored above.
+*.mp4
+*.mov
+*.mkv
