@@ -5,7 +5,8 @@ Captures a region of your screen (e.g. a browser livestream) in real time,
 detects the shuttlecock, and overlays a colored trajectory trail.
 
 Quick start:
-    python3 main_screen.py                 # interactive region picker (classic CV)
+    python3 main_screen.py                 # region picker; TrackNet by default
+    python3 main_screen.py --cv            # force the classic CV detector
     python3 main_screen.py --monitor 1     # whole primary monitor
     python3 main_screen.py --region "100,80,1280,720"
     python3 main_screen.py --yolo          # use trained YOLO model
@@ -22,6 +23,7 @@ Controls (in the tracker window):
 When using --yolo, the classic CV controls have no effect (YOLO doesn't
 need brightness/motion tuning). Use [ and ] to adjust YOLO confidence.
 """
+import os
 import sys
 import cv2
 import numpy as np
@@ -50,8 +52,32 @@ def resolution_arg(value):
     return w, h
 
 
+def tracknet_weights_available():
+    """Whether TrackNet can load without a download."""
+    from tracknet_detector import DEFAULT_MODEL_PATHS
+
+    return any(os.path.exists(p) for p in DEFAULT_MODEL_PATHS)
+
+
 def create_detector(args):
-    """Create the appropriate detector based on flags."""
+    """Create the appropriate detector based on flags.
+
+    With no detector flag at all, TrackNet is the default when its weights are
+    on disk. That is a measurement, not a preference: on the contiguous clips
+    in datasets/eval_ld2011 it gets 70.1% recall at 97.4% precision with 4 px
+    median error, against 37.2%/34.1% for YOLO and effectively nothing for
+    classic CV (see "What has actually been measured" in the README). Classic
+    CV remains the fallback when the weights are missing, and `--cv` forces it
+    — it is six times faster on broadcast-sized frames and it is the right
+    choice on a fixed single-court camera, which is not what the clips are.
+    """
+    explicit = (args.cv or args.tracknet or args.tracknet_model
+                or args.yolo or args.yolo_model)
+    if not explicit and tracknet_weights_available():
+        print("No detector specified - using TrackNet (the measured default). "
+              "Pass --cv for the classic detector.")
+        args.tracknet = True
+
     if args.tracknet or args.tracknet_model:
         try:
             from tracknet_detector import TrackNetHybridDetector
@@ -119,6 +145,9 @@ def main():
                     help="Scale the preview window (auto-fit by default).")
     ap.add_argument("--smooth", type=float, default=0.5,
                     help="Tracker smoothing 0-1 (0=raw, 1=prediction).")
+    ap.add_argument("--cv", action="store_true",
+                    help="Force the classic CV detector. Without any detector "
+                         "flag, TrackNet is used when its weights are present.")
     ap.add_argument("--tracknet", action="store_true",
                     help="Use TrackNet temporal heatmap detector (pre-trained PyTorch model).")
     ap.add_argument("--tracknet-model", type=str, default=None,

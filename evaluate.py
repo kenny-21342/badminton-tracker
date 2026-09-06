@@ -6,7 +6,8 @@ Until now the three detection modes were compared by watching the overlay and
 forming an impression. This runs them over labelled frames and reports numbers,
 so "pick a default" is a decision with evidence behind it.
 
-    python3 evaluate.py                      # all detectors, sequential set
+    python3 evaluate.py                      # all detectors, sampled set
+    python3 evaluate.py --clips              # the contiguous clip set
     python3 evaluate.py --detector tracknet  # just one
     python3 evaluate.py --limit 200          # quick pass
 
@@ -25,8 +26,12 @@ anyway, marked, and also re-reported on the 200-frame validation split it did
 not train on. TrackNet was pre-trained on unrelated broadcast footage and
 classic CV learns nothing, so for those two the set is honest held-out data.
 
-A clean comparison needs clips none of the detectors have seen. Building that
-is a separate job; this at least makes the current state measurable.
+**`--clips` is the layout that actually tests a tracker.** datasets/images is
+1000 frames sampled evenly across the match, so its median run of consecutive
+footage is one frame — a set on which a temporal detector can barely be
+measured at all. datasets/eval_ld2011 holds 151-frame contiguous clips
+instead, one run each. Only the clips with a populated labels_NN directory are
+used; the rest are named and skipped.
 """
 from __future__ import annotations
 
@@ -42,6 +47,10 @@ import numpy as np
 ROOT = Path(__file__).resolve().parent
 IMAGES = ROOT / "datasets" / "images"
 LABELS = ROOT / "datasets" / "labels"
+# Contiguous clips: datasets/eval_ld2011/clip_NN holds 151 consecutive frames
+# and labels_NN holds their labels. This is the layout the numbers should
+# eventually come from — see load_clips.
+EVAL_CLIPS = ROOT / "datasets" / "eval_ld2011"
 
 # Distances, in pixels of the 1280x720 source, at which a detection counts as
 # correct. The shuttlecock's labelled box is around 16x16, so 8 px is "on it",
@@ -65,6 +74,7 @@ class Frame:
     path: Path
     truth: tuple[float, float] | None  # None when no shuttlecock is visible
     starts_run: bool = False           # first frame after a cut
+    clip: str = ""                     # clip_NN in the contiguous set, else ""
 
 
 @dataclass
@@ -124,6 +134,51 @@ def load_frames(images: Path, labels: Path, limit: int | None) -> list[Frame]:
 
     mark_runs(frames)
     return frames
+
+
+def load_clips(root: Path, limit: int | None) -> tuple[list[Frame], list[str]]:
+    """Read the contiguous-clip set, one run per clip.
+
+    Every clip_NN is 151 consecutive frames of footage, so unlike
+    datasets/images there is nothing to guess about where the runs are: each
+    clip is one, and the boundary between two clips is always a cut. Cut
+    detection still runs *inside* a clip, because a broadcast replay can start
+    mid-clip, but it never compares the last frame of one clip against the
+    first of the next.
+
+    A clip is only usable if labels_NN exists and holds at least one label
+    file. A directory of zero .txt files is unlabelled footage, not 151
+    frames that were reviewed and found empty, and counting it as negatives
+    would invent a perfect false-positive score out of nothing. Those clips
+    are skipped and named in the second return value.
+    """
+    frames: list[Frame] = []
+    skipped: list[str] = []
+    for clip_dir in sorted(root.glob("clip_*")):
+        labels_dir = root / clip_dir.name.replace("clip_", "labels_")
+        if not labels_dir.is_dir() or not any(labels_dir.glob("*.txt")):
+            skipped.append(clip_dir.name)
+            continue
+
+        clip_frames: list[Frame] = []
+        for image_path in sorted(clip_dir.glob("*.jpg")):
+            label_path = labels_dir / f"{image_path.stem}.txt"
+            truth = None
+            if label_path.exists() and label_path.stat().st_size > 0:
+                first = label_path.read_text().strip().splitlines()[0].split()
+                if len(first) >= 3:
+                    truth = (float(first[1]), float(first[2]))
+            clip_frames.append(Frame(image_path, truth, clip=clip_dir.name))
+
+        mark_runs(clip_frames)
+        if clip_frames:
+            clip_frames[0].starts_run = True  # a clip boundary is always a cut
+        frames.extend(clip_frames)
+        if limit and len(frames) >= limit:
+            del frames[limit:]
+            break
+
+    return frames, skipped
 
 
 def mark_runs(frames: list[Frame]) -> None:
@@ -258,7 +313,7 @@ def evaluate(name: str, frames: list[Frame]) -> Result:
     return result
 
 
-def report(results: list[Result], contaminated: set[str]) -> None:
+def report(results: list[Result], contaminated: set[str], note: str) -> None:
     print()
     print(f"{'detector':10} {'recall':>8} {'prec':>7} {'FP rate':>8} "
           f"{'median err':>11} {'PCK@8':>7} {'PCK@25':>7} {'PCK@50':>7} {'fps':>6}")
@@ -286,8 +341,7 @@ def report(results: list[Result], contaminated: set[str]) -> None:
     print(f"recall/prec/PCK at {PRIMARY_TOLERANCE}px unless stated. "
           f"FP rate is detections on frames with no shuttlecock.")
     if contaminated:
-        print("* trained on most of these frames — treat as an upper bound, "
-              "not a measurement.")
+        print(note)
 
 
 def main() -> int:
@@ -301,16 +355,36 @@ def main() -> int:
                         help="only the first N frames, for a quick pass")
     parser.add_argument("--images", type=Path, default=IMAGES)
     parser.add_argument("--labels", type=Path, default=LABELS)
+    parser.add_argument(
+        "--clips", type=Path, nargs="?", const=EVAL_CLIPS, default=None,
+        metavar="DIR",
+        help="evaluate the contiguous clip_NN/labels_NN set instead "
+             f"(default {EVAL_CLIPS.name})",
+    )
     args = parser.parse_args()
 
-    if not args.images.is_dir():
-        print(f"no labelled frames at {args.images}", file=sys.stderr)
-        return 1
+    skipped: list[str] = []
+    if args.clips is not None:
+        if not args.clips.is_dir():
+            print(f"no clip set at {args.clips}", file=sys.stderr)
+            return 1
+        frames, skipped = load_clips(args.clips, args.limit)
+        if not frames:
+            print(f"no labelled clips under {args.clips}", file=sys.stderr)
+            return 1
+    else:
+        if not args.images.is_dir():
+            print(f"no labelled frames at {args.images}", file=sys.stderr)
+            return 1
+        frames = load_frames(args.images, args.labels, args.limit)
 
-    frames = load_frames(args.images, args.labels, args.limit)
     positives = sum(1 for frame in frames if frame.truth)
-    print(f"{len(frames)} frames — {positives} with a shuttlecock, "
+    clips = sorted({frame.clip for frame in frames if frame.clip})
+    where = f" over {len(clips)} clips ({', '.join(clips)})" if clips else ""
+    print(f"{len(frames)} frames{where} — {positives} with a shuttlecock, "
           f"{len(frames) - positives} without")
+    if skipped:
+        print(f"skipped {len(skipped)} unlabelled clip(s): {', '.join(skipped)}")
 
     names = args.detector or ["cv", "tracknet", "yolo"]
     results = []
@@ -318,9 +392,20 @@ def main() -> int:
         print(f"  running {name}…", flush=True)
         results.append(evaluate(name, frames))
 
-    # YOLO was fine-tuned on 800 of the 1000 frames in the default set.
-    contaminated = {"yolo"} if args.images == IMAGES else set()
-    report(results, contaminated)
+    # YOLO was fine-tuned on 800 of the 1000 frames in the default set, so it
+    # has literally seen those answers. The clip set holds none of the same
+    # files, but it is cut from the same match, so frames near a training
+    # sample are near-duplicates of it — weaker contamination, still not a
+    # clean held-out measurement. Mark both, differently.
+    if args.clips is not None:
+        contaminated = {"yolo"}
+        note = ("* fine-tuned on frames sampled from this same match. No file "
+                "here was in its training set, but near-duplicates were.")
+    else:
+        contaminated = {"yolo"} if args.images == IMAGES else set()
+        note = ("* trained on most of these frames — treat as an upper bound, "
+                "not a measurement.")
+    report(results, contaminated, note)
     return 0
 
 

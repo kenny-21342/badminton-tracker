@@ -359,18 +359,49 @@ Press **`d`** to open the debug masks window (frame | white | motion | AND).
 Worth being straight about, because most of the claims above are impressions
 rather than measurements.
 
-`evaluate.py` has been run against the 1000 labelled frames in `datasets/`.
-Only YOLO can be judged on them, and only on the 200 it did not train on:
+### The sampled set (`datasets/`, 1000 frames)
+
+Only YOLO can be judged on it, and only on the 200 frames it did not train on:
 **79.5% recall, 92.5% precision, 2.0 px median error**. Its PCK is identical
 at 8, 25 and 50 px, which is what memorising a training set looks like rather
-than generalising, so treat that figure as untested until it faces unseen
-footage.
+than generalising.
 
 Classic CV and TrackNet cannot be judged on that set at all. Both need
 consecutive frames — classic CV compares against the previous one, TrackNet
 reads three at a time — and the set is 1000 sampled frames in 388 runs with a
 median run length of one. Their numbers there measure the dataset, not them.
 
-So **no default detector has been chosen on evidence**. Doing that needs 5–10
-contiguous rallies with ground-truth positions, from footage none of the
-detectors have seen.
+### The contiguous set (`datasets/eval_ld2011/`, 302 labelled frames)
+
+`python3 evaluate.py --clips` — 274 frames with a shuttlecock, 28 without,
+across `clip_01` and `clip_02` (151 consecutive frames each). Tolerance 25 px.
+
+| detector | recall | precision | FP rate | median err | PCK@8 | fps |
+|---|---|---|---|---|---|---|
+| classic CV | 0.4% | 0.3% | 100% | 714 px | 0.0% | 357 |
+| **TrackNet** | **70.1%** | **97.4%** | **7.1%** | **4.0 px** | **59.3%** | **9.1** |
+| YOLO\* | 37.2% | 34.1% | 100% | 152 px | 35.0% | 56 |
+
+\* YOLO was fine-tuned on frames sampled from this same match. None of these
+files were in its training set, but frames a fraction of a second away were,
+so its row is still not clean held-out data — and it is the worst of the two
+learned detectors regardless.
+
+**TrackNet is the default**, and this is the evidence for it. It is the only
+detector that is right more often than not, its 97.4% precision means a
+detection can be trusted rather than filtered, and 4 px median error is inside
+the shuttlecock's own 16 px box. It pays for that at 9 fps, roughly a sixth of
+YOLO's rate — use `--tracknet-input 256x144 --tracknet-fp16` when live speed
+matters more than accuracy.
+
+Two honest caveats:
+
+- **This is broadcast footage, which is not what classic CV is for.** It
+  tracks a white, moving blob, and a broadcast frame is full of white-clad
+  players, line judges and crowd. On a fixed camera pointed at one court —
+  the app's actual use case — it does considerably better than 0.4%. Its row
+  here says "do not use this on television", not "this code is broken".
+- **Two clips is not enough.** The measurement wants 5–10, and
+  `clip_03`–`clip_08` are extracted but unlabelled (`evaluate.py --clips`
+  names them as skipped on every run). Label them with `labeler.py` and rerun;
+  the numbers above should be treated as provisional until then.
