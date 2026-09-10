@@ -123,15 +123,22 @@ class PredictedPointTests(unittest.TestCase):
         tracker = TrajectoryTracker()
         tracker.observed_fps = 30.0
         x, y = 200.0, 400.0
+        # The stroke reverses vertical velocity by 34 px/frame, comfortably
+        # over the 25 px/frame threshold. It used to reverse by 18 and still
+        # register, because the old fixed smoothing overshot the turn and
+        # reported a velocity change of 27 that the shuttle never made. With
+        # the trajectory tracked accurately the inflation is gone, so the
+        # stroke has to clear the threshold on its own to be testing what this
+        # case is about: that a predicted point does not hide the reversal.
         for _ in range(6):
             x += 8
-            y -= 8
+            y -= 16
             tracker.add_point((x, y))
         tracker.add_point(None)     # struck while out of sight
         before = tracker.hit_count
         for _ in range(6):
             x += 10
-            y += 10
+            y += 18
             tracker.add_point((x, y))
 
         self.assertGreater(tracker.hit_count, before,

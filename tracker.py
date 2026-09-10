@@ -22,12 +22,18 @@ class TrajectoryTracker:
     """
 
     def __init__(self, max_trajectory_length=60, hit_detection_threshold=25,
-                 smoothing=0.5, cut_threshold=40.0):
+                 smoothing=0.5, cut_threshold=40.0,
+                 adaptive_smoothing=True):
         self.trajectory = deque(maxlen=max_trajectory_length)
         self.point_is_predicted = deque(maxlen=max_trajectory_length)
         self.velocities = deque(maxlen=max_trajectory_length)
         self.hit_detection_threshold = hit_detection_threshold
         self.smoothing = smoothing  # 0 = trust detection, 1 = trust prediction
+        # With adaptive smoothing on, `smoothing` is a ceiling rather than a
+        # fixed blend: see _effective_smoothing for why a fixed one costs
+        # accuracy without buying much steadiness.
+        self.adaptive_smoothing = adaptive_smoothing
+        self.frames_since_acquired = 0
         self.no_detection_count = 0
         self.max_no_detection = 12   # frames to keep predicting before giving up
         self.last_velocity = (0.0, 0.0)
@@ -165,6 +171,8 @@ class TrajectoryTracker:
             self.out_of_frame = False
             # Reset velocity so we don't smear from the old off-frame position.
             self.last_velocity = (0.0, 0.0)
+            # The velocity estimate starts again, so the track is young again.
+            self.frames_since_acquired = 0
 
         # Check if it's now near the edge → mark as potentially leaving.
         if self._is_near_edge(point):
@@ -175,13 +183,14 @@ class TrajectoryTracker:
             # First sight of the shuttle since the last rally ended.
             self.rally_active = True
             self.rally_count = 0
+        self.frames_since_acquired += 1
         if self.last_smoothed is None:
             smoothed = point
             vel = (0.0, 0.0)
         else:
             predicted, _ = self._predict_from(self.last_smoothed,
                                               self.last_velocity)
-            s = self.smoothing
+            s = self._effective_smoothing(predicted, point)
             smoothed = (
                 predicted[0] * s + point[0] * (1 - s),
                 predicted[1] * s + point[1] * (1 - s),
@@ -193,6 +202,57 @@ class TrajectoryTracker:
         return hit
 
     # ------------------------------------------------------------- internals
+    # How far the prediction may miss before it stops being trusted. Roughly
+    # the detector's own median error (4 px on the labelled clips), so a
+    # prediction no worse than the detector keeps full weight.
+    _RESIDUAL_TOLERANCE = 6.0
+    # Frames of real detections needed before the velocity estimate is worth
+    # blending towards at all.
+    _MATURITY_FRAMES = 4
+
+    def _effective_smoothing(self, predicted, point):
+        """How far to lean on the prediction for this frame, in 0..1.
+
+        A fixed blend is the wrong shape for a shuttlecock. Measured against
+        the labelled clips in datasets/eval_ld2011, holding TrackNet fixed and
+        varying only this number, a fixed blend costs accuracy at every
+        setting and buys very little steadiness:
+
+            s     median error   mean jerk
+            0.0       4.00 px      25.0
+            0.1       4.53 px      19.8
+            0.5       9.01 px      14.7      <- the old default
+            0.9     161.00 px      23.7
+
+        The reason is lag. A one-step linear-plus-gravity prediction cannot
+        keep up with a smash, so blending towards it drags the point behind
+        the shuttle; past s=0.6 the prediction diverges and the trail is not
+        even smooth any more.
+
+        So the blend is spent only where it is cheap. Two things pull it down:
+
+        - Disagreement. When the detection lands far from the prediction the
+          motion model has been overtaken by events -- a hit, a direction
+          change, a fast rally -- and the detection is the better estimate.
+        - Youth. Just after the shuttle is picked up the velocity estimate is
+          built from one or two frames and predicts nearly nothing useful.
+
+        When neither applies -- a slow, well-tracked shuttle whose prediction
+        lands on top of the detection -- smoothing is close to free, and that
+        is the case it is allowed to act on.
+        """
+        if not self.adaptive_smoothing:
+            return self.smoothing
+
+        maturity = min(1.0, self.frames_since_acquired / self._MATURITY_FRAMES)
+
+        residual = math.hypot(predicted[0] - point[0], predicted[1] - point[1])
+        # Falls off smoothly rather than at a threshold, so a trail does not
+        # visibly change character frame to frame.
+        agreement = 1.0 / (1.0 + (residual / self._RESIDUAL_TOLERANCE) ** 2)
+
+        return self.smoothing * maturity * agreement
+
     def _append_smoothed(self, smoothed, raw, is_predicted, vel=None):
         pt = (int(smoothed[0]), int(smoothed[1]))
         self.trajectory.append(pt)
@@ -361,6 +421,7 @@ class TrajectoryTracker:
         self.last_velocity = (0.0, 0.0)
         self.last_smoothed = None
         self.no_detection_count = 0
+        self.frames_since_acquired = 0
         self.cooldown = 0
         self.out_of_frame = False
 
