@@ -25,3 +25,9 @@ venv/
 *.mp4
 *.mov
 *.mkv
+
+# PyInstaller output. The .app is ~940 MB (most of it Torch) and is rebuilt
+# from BadmintonTracker.spec with:
+#   python3 -m PyInstaller --noconfirm BadmintonTracker.spec
+build/
+dist/

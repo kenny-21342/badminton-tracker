@@ -16,15 +16,19 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-# Common default model paths
-DEFAULT_MODEL_PATHS = [
+from resources import candidate_paths
+
+# Common default model paths, each tried as given (relative to the working
+# directory) and then inside the app bundle, so a double-clicked .app finds
+# the weights it ships with.
+DEFAULT_MODEL_PATHS = candidate_paths([
     "models/TrackNet_best.pt",
     "weights/TrackNet_best.pt",
     "ckpts/TrackNet_best.pt",
     "TrackNet_best.pt",
     "models/tracknet_model.pt",
     "weights/tracknet_model.pt"
-]
+])
 
 
 class Conv2DBlock(nn.Module):
@@ -373,10 +377,15 @@ class TrackNetHybridDetector:
                 self.engine_name = "mlx"
                 print(f"Loaded TrackNet (MLX engine) from: "
                       f"{self.tracknet.model_path}")
-            except ImportError:
+            except ImportError as e:
+                # Say which import failed. This fires both when mlx is not
+                # installed and when it is installed but unreachable (a
+                # frozen bundle missing a submodule), and those need
+                # different fixes.
                 if engine == "mlx":
-                    print("Notice: MLX engine unavailable (install with: "
-                          "pip install mlx). Falling back to PyTorch.")
+                    print(f"Notice: MLX engine unavailable ({e}). "
+                          "If mlx is not installed: pip install mlx. "
+                          "Falling back to PyTorch.")
                 self.tracknet = None
             except Exception as e:
                 if engine == "mlx":

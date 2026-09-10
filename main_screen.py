@@ -37,6 +37,7 @@ from region_selector import select_region
 from ui_overlay import OverlayUI
 from config_manager import ConfigManager
 from session_recorder import SessionRecorder
+from screen_permission import check_capture_permitted, report_problem
 
 
 def resolution_arg(value):
@@ -186,6 +187,16 @@ def main():
 
     # --- Determine capture region -----------------------------------------
     sct = mss()
+
+    # A denied capture is not an error on macOS, just a blank frame. Check
+    # before the region picker, which would otherwise ask the user to drag a
+    # selection over a black rectangle.
+    permitted, message = check_capture_permitted(
+        sct, sct.monitors[args.monitor if args.monitor is not None else 1])
+    if not permitted:
+        report_problem(message)
+        return 1
+
     if args.region:
         x, y, w, h = map(int, args.region.split(","))
         monitor = {"left": x, "top": y, "width": w, "height": h}
@@ -526,4 +537,4 @@ def _build_hud(detector, tracker, mode, det_source, fps):
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main() or 0)

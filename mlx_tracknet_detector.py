@@ -28,8 +28,13 @@ try:
     import mlx.core as mx
     import mlx.nn as nn
     _MLX_AVAILABLE = True
-except ImportError:
+    _MLX_IMPORT_ERROR = None
+except ImportError as _mlx_error:
     _MLX_AVAILABLE = False
+    # Keep the reason. "mlx is not installed" is only one way this fails; in a
+    # frozen bundle mlx is present but a submodule or its Metal library is
+    # missing, and that needs a different fix.
+    _MLX_IMPORT_ERROR = _mlx_error
 
 
 _POOL = nn.MaxPool2d(2, 2) if _MLX_AVAILABLE else None
@@ -106,7 +111,8 @@ class MLXTrackNetDetector:
                  device=None):
         if not _MLX_AVAILABLE:
             raise ImportError(
-                "mlx is not installed. Run: pip install mlx")
+                f"MLX could not be imported: {_MLX_IMPORT_ERROR}. "
+                "If mlx is missing, run: pip install mlx")
 
         self.confidence = confidence
         self.input_width = input_width
