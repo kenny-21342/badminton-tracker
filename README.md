@@ -199,13 +199,25 @@ Running from source still uses MLX.
 ### Rendering a demo clip
 
 ```bash
-python3 make_demo.py --input match.mp4 --start 1830 --duration 12 \
+python3 make_demo.py --input match.mp4 --start 773 --duration 12 \
     --output demo.mp4
 ```
 
 Runs the same detector, tracker and visualiser the live app uses, but reads a
 video file and writes an annotated mp4 — no screen capture, no recorder, and
 the result is reproducible.
+
+Finding a rally to point it at is `extract_frames.py`'s job — `find_rallies()`
+scores every frame against the empty court and returns the unbroken wide-court
+stretches. On the 2011 final it finds 466 shots, 85 of them over six seconds.
+The clip at 773 s renders 147 detections across 300 frames, 12 hits and 3
+rallies.
+
+Rendering is not real time: about 13 s of compute per second of 1280×720
+footage, since it decodes the file and runs TrackNet on every frame.
+
+The rendered clip is not committed, for the same reason `datasets/` and the
+source `.mp4` are not — broadcast footage is not ours to redistribute.
 
 ## Usage reference
 

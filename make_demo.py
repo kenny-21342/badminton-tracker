@@ -115,7 +115,9 @@ def main():
                         current_point=current)
         visualizer.draw_info(frame, len(trajectory), fps=fps,
                              rally=tracker.rally_count,
-                             hits=tracker.hit_count)
+                             hits=tracker.hit_count,
+                             speed=tracker.current_speed() * inv_scale,
+                             rallies=tracker.rallies_completed)
         writer.write(frame)
 
         if index and index % 25 == 0:
