@@ -174,7 +174,38 @@ pip3 install -r requirements.txt
 ```
 
 On first run macOS may prompt for **Screen Recording** permission — grant it
-in *System Settings > Privacy & Security* and restart.
+in *System Settings > Privacy & Security*, then quit and reopen the app. The
+grant only applies to freshly launched processes.
+
+macOS does not report a refusal as an error: a denied capture succeeds and
+returns a blank frame, so without a check the tracker runs against a black
+screen and looks like a detector that cannot find anything. The app now tests
+one frame at startup and stops with an explanation instead.
+
+### Building the macOS app
+
+```bash
+pip3 install pyinstaller
+python3 -m PyInstaller --noconfirm BadmintonTracker.spec
+open "dist/Badminton Tracker.app"
+```
+
+The bundle is ~940 MB, most of it PyTorch, and ships the TrackNet weights so it
+works on first launch with no download. One known limitation: MLX fails to
+initialise inside the bundle, so the packaged app runs TrackNet on Torch/MPS
+rather than MLX. Measured cost at 512x288 is 4.8 fps against 5.4 — about 12%.
+Running from source still uses MLX.
+
+### Rendering a demo clip
+
+```bash
+python3 make_demo.py --input match.mp4 --start 1830 --duration 12 \
+    --output demo.mp4
+```
+
+Runs the same detector, tracker and visualiser the live app uses, but reads a
+video file and writes an annotated mp4 — no screen capture, no recorder, and
+the result is reproducible.
 
 ## Usage reference
 
@@ -190,7 +221,7 @@ python3 main_screen.py --region "100,80,1280,720"  # explicit region
 
 ```bash
 python3 main_screen.py --scale 0.4              # classic CV: smaller = faster
-python3 main_screen.py --smooth 0.4             # lower = snappier, higher = smoother
+python3 main_screen.py --smooth 0.4             # ceiling on prediction blending (see below)
 python3 main_screen.py --display-scale 0.75     # shrink preview window
 python3 main_screen.py --tracknet --tracknet-input 256x144 --tracknet-fp16  # TrackNet speed mode
 ```
@@ -299,6 +330,10 @@ Press **`d`** to open the debug masks window (frame | white | motion | AND).
 | `evaluate.py` | Measure detector accuracy against labelled frames |
 | `benchmark.py` | Measure detector speed on synthetic frames |
 | `frame_classifier.py` | Court-view classifier used when sampling frames |
+| `make_demo.py` | Render an annotated demo clip from a video file, headlessly |
+| `screen_permission.py` | Detects a denied Screen Recording permission before capture |
+| `resources.py` | Resolves bundled data files when running from a .app |
+| `BadmintonTracker.spec` | PyInstaller recipe for the double-clickable macOS app |
 | `main.py` | Legacy entry point for video files / webcams |
 
 ## How it works
@@ -352,7 +387,12 @@ Press **`d`** to open the debug masks window (frame | white | motion | AND).
   section said 4–6 FPS, which contradicted the table above it and was wrong.
 - **Hit counting** is heuristic and works best with a stable camera and a
   clear side-view of the court. Press `SPACE` during replays and adverts:
-  movement on screen is counted as play otherwise.
+  movement on screen is counted as play otherwise. Its 25 px/frame threshold
+  has never been checked against hit-level ground truth — see the smoothing
+  section under "What has actually been measured".
+- **The packaged .app runs TrackNet on Torch/MPS, not MLX.** MLX fails to
+  initialise inside the PyInstaller bundle. Costs about 12% (4.8 fps against
+  5.4 at 512×288). Running from source is unaffected.
 
 ## What has actually been measured
 
@@ -405,3 +445,43 @@ Two honest caveats:
   `clip_03`–`clip_08` are extracted but unlabelled (`evaluate.py --clips`
   names them as skipped on every run). Label them with `labeler.py` and rerun;
   the numbers above should be treated as provisional until then.
+
+### Smoothing (`--smooth`)
+
+Same clips, same detector, varying only the smoothing blend. Error is against
+the labelled positions on frames that had a real detection; "gap err" is on
+frames the tracker filled in by prediction; "jerk" is the mean second
+difference along the drawn trail, a proxy for how steady it looks.
+
+| setting | median err | mean err | mean jerk | gap err |
+|---|---|---|---|---|
+| raw detections | 4.00 px | 5.33 px | — | — |
+| fixed 0.1 | 4.53 px | 6.85 px | 19.8 | 50.6 px |
+| fixed 0.5 *(old default)* | 9.01 px | 21.56 px | 14.7 | 53.5 px |
+| fixed 0.9 | 161.00 px | 206.18 px | 23.7 | 288.1 px |
+| **adaptive (any ceiling)** | **~4.00 px** | **~5.4 px** | 24.4 | **30.9 px** |
+
+A fixed blend cost accuracy at every setting, and the old default of 0.5 more
+than doubled the median error. The cause is lag: a one-step linear-plus-gravity
+prediction cannot keep up with a shuttlecock, so blending towards it drags the
+drawn point behind the real one. Past 0.6 the prediction diverges and the trail
+is not even steady any more.
+
+The steadiness a fixed blend appeared to buy was mostly that same lag rather
+than noise suppression, and there is no good trade on the curve: loosening the
+adaptive tolerance to buy smoothness back moves mean jerk only from 24.5 to
+22.0 while median error goes from 4.0 to 5.4.
+
+So smoothing is now **adaptive** and `--smooth` sets a ceiling rather than a
+fixed blend. It is scaled down when the detection disagrees with the prediction
+(a hit, a direction change) and when the track is too young for its velocity
+estimate to mean anything — leaving it to act only where it is close to free.
+`TrajectoryTracker(adaptive_smoothing=False)` restores the old behaviour.
+
+One thing this does **not** claim: that hit counting improved. Hit detection's
+25 px/frame threshold was calibrated while trajectories were lagged, and the
+old smoother overshot direction changes enough to inflate the measured velocity
+change. On ground truth, real vertical reversals span 5.5–94 px/frame with a
+median of 19.4, so the threshold sits inside the distribution with no clean
+separation to move it to. Choosing a better value needs hit-level ground truth,
+which the eval set does not have.
