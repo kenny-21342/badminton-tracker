@@ -105,6 +105,43 @@ diverse shuttle positions (fast smashes, slow drops, near net, near baseline).
 
 ### Step 3 — Label the shuttlecock
 
+Most frames do not need a box drawn — they need one confirmed. `labeler.py`
+pre-seeds TrackNet's detection in amber; `a` (or SPACE) accepts it, and it is
+not a label until you do. Measured over `clip_01` + `clip_02`:
+
+| what the frame needs | frames | share |
+|---|---|---|
+| accept the suggestion (1 key) | 176 | 58.3% |
+| confirm "no shuttle" (1 key) | 26 | 8.6% |
+| correct a wrong box | 19 | 6.3% |
+| reject a false positive | 2 | 0.7% |
+| draw from scratch | 79 | 26.2% |
+
+**67% of frames become one keypress**, and accepted suggestions sit 3.6 px from
+the hand labels. Suggestions need consecutive frames — TrackNet finds the
+shuttle partly by where it moved — so on a directory of sampled frames the tool
+says so and turns them off rather than suggesting noise. `--no-suggest`
+disables them.
+
+For **training** sets you can go further and label only every Nth frame:
+
+```bash
+python3 labeler.py --images clip_03 --labels labels_03 --stride 3
+python3 labeler.py --images clip_03 --labels labels_03 --fill
+```
+
+At stride 3 that is a third of the work, and filling reproduces held-out labels
+to 3.8 px median with 83% inside 12 px. **Do not do this for an evaluation
+set**: ~10% of filled frames land over 23 px out, and ~8% place a shuttlecock
+on a frame that was actually empty, which would flatter recall in the very
+measurement the set exists for. Filled frames are recorded under `filled` in
+`_assist.json` so a set can always be cut back to observed frames.
+
+Two approaches that were tried and **rejected on measurement**: interpolating
+across the detector's own gaps (only ~50% within 12 px — it misses exactly the
+fast, blurred frames where a straight line is worst), and adding anchors where
+the detected path bends most (6 points more labelling, no accuracy gain).
+
 ```bash
 python3 labeler.py
 ```
@@ -336,6 +373,7 @@ Press **`d`** to open the debug masks window (frame | white | motion | AND).
 | `region_selector.py` | Interactive drag-to-select capture region |
 | `extract_frames.py` | Sample frames from video/screen for labeling |
 | `labeler.py` | Interactive labeling tool (drag boxes around shuttle) |
+| `label_assist.py` | Detector suggestions and sparse-label interpolation |
 | `train.py` | Fine-tune YOLOv8 on your labeled frames |
 | `download_tracknet.py` | Download pre-trained TrackNetV2 weights |
 | `export_tracknet_coreml.py` | Export TrackNet to CoreML (needs Python <= 3.13) |
