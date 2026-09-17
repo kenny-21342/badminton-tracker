@@ -59,17 +59,78 @@ def frame_index(image_path):
     return int(digits) if digits else None
 
 
-def is_contiguous(image_paths):
-    """Whether these frames are consecutive footage rather than a sample.
+# Median mean-absolute-difference, on a 32x32 grey thumbnail, above which
+# neighbouring frames are not 40 ms apart.
+#
+# Calibrated on this repo's two regimes: the contiguous clips sit at 0.80-0.91
+# and the sampled datasets/images at 4.19-4.84, a ~5x gap that holds at every
+# thumbnail size from 32 to 256. 2.0 leaves better than 2x margin either side.
+# Individual PAIRS overlap -- a sampled pair can differ by 2.3 and a contiguous
+# one by 2.6 -- which is why this is a median over many pairs and not a test
+# any single pair can fail.
+CONTIGUITY_MAX_DIFF = 2.0
 
-    TrackNet reads several frames at once -- it finds the shuttle partly by
-    where it moved -- so on a directory of frames sampled minutes apart its
-    output is meaningless. Better to say so than to suggest nonsense.
+
+def looks_sequential(image_paths):
+    """Whether the filenames are consecutively numbered.
+
+    A necessary condition for contiguous footage, and nowhere near a
+    sufficient one: extract_frames.py numbers its output 0000, 0001, 0002 even
+    when it sampled those frames minutes apart.
     """
     indices = [frame_index(p) for p in image_paths]
     if any(i is None for i in indices):
         return False
     return all(b - a == 1 for a, b in zip(indices, indices[1:]))
+
+
+def frame_difference(first_path, second_path):
+    """Mean absolute difference between two frames, or None if unreadable."""
+    import cv2
+    import numpy as np
+
+    first, second = cv2.imread(first_path), cv2.imread(second_path)
+    if first is None or second is None:
+        return None
+    small = lambda image: cv2.resize(
+        cv2.cvtColor(image, cv2.COLOR_BGR2GRAY), (32, 32)).astype(int)
+    return float(np.abs(small(first) - small(second)).mean())
+
+
+def neighbour_difference(image_paths, samples=20):
+    """Median difference between neighbouring frames, or None if unreadable."""
+    if len(image_paths) < 2:
+        return None
+    step = max(1, (len(image_paths) - 1) // samples)
+    diffs = []
+    for i in range(0, len(image_paths) - 1, step):
+        diff = frame_difference(image_paths[i], image_paths[i + 1])
+        if diff is not None:
+            diffs.append(diff)
+    if not diffs:
+        return None
+    diffs.sort()
+    return diffs[len(diffs) // 2]
+
+
+def is_contiguous(image_paths, max_diff=CONTIGUITY_MAX_DIFF, samples=20):
+    """Whether these frames are consecutive footage rather than a sample.
+
+    Two things depend on this. TrackNet reads several frames at once -- it
+    finds the shuttle partly by where it moved -- so on frames sampled minutes
+    apart its suggestions are noise. And contiguous frames must not be split
+    between train and val, because neighbours are near-identical.
+
+    The filenames cannot answer it. `datasets/images` is numbered 0000-0999 and
+    is not contiguous at all, so this looks at the pixels: consecutive frames
+    of a rally barely differ, sampled ones do. The median over several pairs,
+    not the mean, so a camera cut inside otherwise-continuous footage does not
+    flip the verdict.
+    """
+    if len(image_paths) < 2 or not looks_sequential(image_paths):
+        return False
+    median = neighbour_difference(image_paths, samples=samples)
+    return median is not None and median <= max_diff
 
 
 # --------------------------------------------------------------- suggestions

@@ -168,6 +168,34 @@ Labels are saved to `datasets/labels/` in YOLO format.
 
 ### Step 4 — Train
 
+`train.py` splits train/val by *group*, not by frame. Neighbouring frames of a
+rally are near-identical, so splitting them at random puts a frame in train and
+the frame 40 ms later in val, and the validation score stops measuring
+generalisation. Contiguous clips are therefore kept whole; sampled frames are
+far enough apart to split individually. Which a directory is gets decided from
+the pixels, not the filenames — `extract_frames.py` numbers sampled frames
+`0000, 0001, 0002` even when they are minutes apart — and the measurement is
+printed so you can check it:
+
+```
+  images:  1000 frames (neighbour diff 4.84 — sampled, split individually)
+  clip_03:  151 frames (neighbour diff 0.85 — contiguous, kept together)
+```
+
+Fold extra clips in with `--add`, repeatable:
+
+```bash
+python3 train.py \
+    --add datasets/eval_ld2011/clip_03:datasets/eval_ld2011/labels_03 \
+    --add datasets/eval_ld2011/clip_04:datasets/eval_ld2011/labels_04
+```
+
+`datasets/yolo/` is rebuilt from scratch each run. It used to be written
+incrementally and skip files already present, so a frame that landed in val on
+one run and train on the next stayed in both — training on part of the
+validation set, silently. Adding `clip_01` or `clip_02` also prints a warning:
+those are what `evaluate.py --clips` measures against.
+
 ```bash
 python3 train.py
 ```
@@ -374,7 +402,7 @@ Press **`d`** to open the debug masks window (frame | white | motion | AND).
 | `extract_frames.py` | Sample frames from video/screen for labeling |
 | `labeler.py` | Interactive labeling tool (drag boxes around shuttle) |
 | `label_assist.py` | Detector suggestions and sparse-label interpolation |
-| `train.py` | Fine-tune YOLOv8 on your labeled frames |
+| `train.py` | Fine-tune YOLOv8 on your labeled frames (group-aware split) |
 | `download_tracknet.py` | Download pre-trained TrackNetV2 weights |
 | `export_tracknet_coreml.py` | Export TrackNet to CoreML (needs Python <= 3.13) |
 | `evaluate.py` | Measure detector accuracy against labelled frames |

@@ -11,6 +11,9 @@ import os
 import tempfile
 import unittest
 
+import cv2
+import numpy as np
+
 from label_assist import (
     DEFAULT_MAX_FILL_GAP,
     SIDECAR,
@@ -19,6 +22,7 @@ from label_assist import (
     interpolate,
     is_contiguous,
     load_sidecar,
+    looks_sequential,
     save_sidecar,
 )
 
@@ -36,17 +40,55 @@ class FrameNaming(unittest.TestCase):
         self.assertIsNone(frame_index("/a/photo.jpg"))
 
 
-class Contiguity(unittest.TestCase):
-    def test_consecutive_frames_are_contiguous(self):
-        self.assertTrue(is_contiguous(names(10)))
+class SequentialNaming(unittest.TestCase):
+    def test_consecutive_numbers_look_sequential(self):
+        self.assertTrue(looks_sequential(names(10)))
 
-    def test_sampled_frames_are_not(self):
-        # datasets/images holds frames sampled minutes apart. TrackNet reads
-        # motion across several frames, so suggestions there would be noise.
-        self.assertFalse(is_contiguous(names(10, step=25)))
+    def test_gaps_do_not(self):
+        self.assertFalse(looks_sequential(names(10, step=25)))
+
+    def test_unnumbered_frames_do_not(self):
+        self.assertFalse(looks_sequential(["/a/one.jpg", "/a/two.jpg"]))
+
+
+def write_frames(directory, count, drift):
+    """Frames whose content changes by `drift` grey levels per step."""
+    paths = []
+    base = np.full((64, 64, 3), 40, dtype=np.uint8)
+    for i in range(count):
+        frame = np.clip(base.astype(int) + i * drift, 0, 255).astype(np.uint8)
+        path = os.path.join(directory, f"frame_{i:04d}.jpg")
+        cv2.imwrite(path, frame)
+        paths.append(path)
+    return paths
+
+
+class Contiguity(unittest.TestCase):
+    """Filenames cannot answer this — extract_frames.py numbers sampled
+    frames 0000, 0001, 0002 even when they are minutes apart, so the test has
+    to look at the pixels."""
+
+    def test_barely_changing_frames_are_contiguous(self):
+        with tempfile.TemporaryDirectory() as directory:
+            paths = write_frames(directory, 12, drift=1)
+            self.assertTrue(is_contiguous(paths))
+
+    def test_sequentially_named_but_jumpy_frames_are_not(self):
+        # The datasets/images case: numbered 0000-0999, sampled minutes apart.
+        with tempfile.TemporaryDirectory() as directory:
+            paths = write_frames(directory, 12, drift=40)
+            self.assertFalse(is_contiguous(paths))
 
     def test_unnumbered_frames_are_not(self):
         self.assertFalse(is_contiguous(["/a/one.jpg", "/a/two.jpg"]))
+
+    def test_unreadable_frames_are_not(self):
+        # Never guess "contiguous" from filenames alone when the pixels are
+        # unavailable: that is the failure this test replaced.
+        self.assertFalse(is_contiguous(names(10)))
+
+    def test_a_single_frame_is_not(self):
+        self.assertFalse(is_contiguous(names(1)))
 
 
 class Anchors(unittest.TestCase):
