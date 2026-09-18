@@ -36,6 +36,7 @@ class PointStyleIsQuieter(unittest.TestCase):
         trail = a_trail()
         visualiser = TrajectoryVisualizer()
 
+        visualiser.style = "trail"
         with_trail = blank()
         visualiser.draw(with_trail, trail, current_point=trail[-1])
 
@@ -80,6 +81,7 @@ class PredictedPositionsLookDifferent(unittest.TestCase):
     def test_trail_style_marks_predictions_too(self):
         # The distinction belongs to the marker, not to one style.
         visualiser = TrajectoryVisualizer()
+        visualiser.style = "trail"
         trail = a_trail()
         detected, guessed = blank(), blank()
         visualiser.draw(detected, trail, current_point=trail[-1],
@@ -100,8 +102,8 @@ class PredictedPositionsLookDifferent(unittest.TestCase):
 
 
 class StyleDefault(unittest.TestCase):
-    def test_trail_remains_the_default(self):
-        self.assertEqual(TrajectoryVisualizer().style, "trail")
+    def test_point_is_the_default(self):
+        self.assertEqual(TrajectoryVisualizer().style, "point")
 
 
 if __name__ == "__main__":

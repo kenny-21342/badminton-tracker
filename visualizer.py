@@ -51,10 +51,12 @@ class TrajectoryVisualizer:
         self.minimap_w = 214  # ~2:1 aspect, mini court
         self.theme = Theme.DARK
         self.trail_opacity = 0.8
-        # "trail" draws the whole tracked path; "point" draws only where the
-        # shuttle is now. See draw() for why point mode still wants the
-        # tracker's gap filling underneath it.
-        self.style = "trail"
+        # "point" draws only where the shuttle is now; "trail" draws the whole
+        # tracked path. Point is the default because on broadcast footage the
+        # trail is a long streak across the frame, much of it extrapolated
+        # through gaps, sitting on top of the thing it points at. See draw()
+        # for why point mode still wants the tracker's gap filling underneath.
+        self.style = "point"
 
     def set_theme(self, theme_name):
         """Set the color theme (dark or light)."""

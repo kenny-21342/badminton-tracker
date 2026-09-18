@@ -2,7 +2,8 @@
 Badminton Trajectory Tracker - Screen Capture Mode.
 
 Captures a region of your screen (e.g. a browser livestream) in real time,
-detects the shuttlecock, and overlays a colored trajectory trail.
+detects the shuttlecock, and marks it on screen (press p for the
+full trajectory trail instead).
 
 Quick start:
     python3 main_screen.py                 # region picker; TrackNet by default
@@ -145,9 +146,9 @@ def main():
                     help="Classic detector processing scale (0.25-1.0).")
     ap.add_argument("--display-scale", type=float, default=None,
                     help="Scale the preview window (auto-fit by default).")
-    ap.add_argument("--style", choices=("trail", "point"), default="trail",
-                    help="Overlay style: the full trail, or just a marker on "
-                         "the shuttle. Toggle live with p.")
+    ap.add_argument("--style", choices=("trail", "point"), default="point",
+                    help="Overlay style: a marker on the shuttle (default), or "
+                         "the full trail. Toggle live with p.")
     ap.add_argument("--smooth", type=float, default=0.5,
                     help="Tracker smoothing 0-1 (0=raw, 1=prediction).")
     ap.add_argument("--cv", action="store_true",

@@ -2,7 +2,8 @@
 
 Tracks the path of the shuttlecock on your screen in real time while you watch
 a badminton livestream (browser, media player, anything on screen). Draws a
-color-coded trail of the rally and counts hits.
+marks the shuttlecock on screen and counts hits (press `p` for a
+color-coded trail of the rally instead).
 
 Supports three detection modes:
 - **TrackNet AI** (`--tracknet`) — **Zero manual labeling required!** Deep-learning temporal heatmap model (TrackNetV2) pre-trained on professional badminton broadcast footage. Processes 3 consecutive frames and outputs heatmaps that locate fast-moving, blurred shuttlecocks.
@@ -221,7 +222,10 @@ python3 main_screen.py --yolo --yolo-conf 0.15   # lower = more sensitive
 
 ## What you see on screen (the result)
 
-- **Colored trajectory trail** – a glowing polyline following the shuttlecock.
+- **Shuttle marker** – a ring on the shuttlecock; solid when detected, hollow
+  when the position was bridged across a gap. This is the default.
+- **Colored trajectory trail** – a glowing polyline following the shuttlecock,
+  on `p`.
   **Green = slow** (drop shots / net play), **yellow = medium**, **red = fast**
   (smashes / clears). Older points fade out; the newest position is a red dot.
 - **"HIT!" flash** – when a direction reversal or sharp deceleration is
@@ -455,8 +459,8 @@ Press **`d`** to open the debug masks window (frame | white | motion | AND).
 
 ### Overlay style: trail or point
 
-`p` toggles, `--style point` starts there. The trail draws the whole tracked
-path; point draws only where the shuttle is now.
+Point is the default; `p` toggles, `--style trail` starts on the trail. The
+trail draws the whole tracked path; point draws only where the shuttle is now.
 
 On broadcast footage the trail is a long streak across the frame, much of it
 extrapolated through gaps, sitting on top of the thing it points at. The point

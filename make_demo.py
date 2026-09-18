@@ -58,9 +58,9 @@ def main():
     ap.add_argument("--model", default=None, help="TrackNet weights path.")
     ap.add_argument("--trail", type=int, default=30,
                     help="Trail length in points.")
-    ap.add_argument("--style", choices=("trail", "point"), default="trail",
-                    help="Overlay style: the full trail, or just a marker on "
-                         "the shuttle.")
+    ap.add_argument("--style", choices=("trail", "point"), default="point",
+                    help="Overlay style: a marker on the shuttle (default), or "
+                         "the full trail.")
     args = ap.parse_args()
 
     cap = cv2.VideoCapture(args.input)
