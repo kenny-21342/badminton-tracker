@@ -16,6 +16,7 @@ Controls (in the tracker window):
     c   clear trajectory            +/-  brightness threshold up/down (classic)
     r   reset rally counter         [, ] motion threshold / YOLO confidence
     m   toggle minimap              , /. smoothing down/up
+    p   trail <-> point overlay
     s   toggle smoothing            d   toggle debug masks view (classic)
     h   toggle HUD                  w/e saturation down/up (classic)
     q   quit
@@ -144,6 +145,9 @@ def main():
                     help="Classic detector processing scale (0.25-1.0).")
     ap.add_argument("--display-scale", type=float, default=None,
                     help="Scale the preview window (auto-fit by default).")
+    ap.add_argument("--style", choices=("trail", "point"), default="trail",
+                    help="Overlay style: the full trail, or just a marker on "
+                         "the shuttle. Toggle live with p.")
     ap.add_argument("--smooth", type=float, default=0.5,
                     help="Tracker smoothing 0-1 (0=raw, 1=prediction).")
     ap.add_argument("--cv", action="store_true",
@@ -228,6 +232,7 @@ def main():
     # Load saved settings
     tracker.smoothing = config.get("smoothing", args.smooth)
     visualizer.show_minimap = config.get("show_minimap", True)
+    visualizer.style = config.get("style", args.style)
     visualizer.set_theme(config.get("theme", "dark"))
     visualizer.trail_opacity = config.get("trail_opacity", 0.8)
 
@@ -305,7 +310,12 @@ def main():
                 vels = tracker.get_velocities()
 
             # --- Draw -----------------------------------------------------
-            frame = visualizer.draw(frame, traj, vels, det_full, 0)
+            # The tracker knows whether this position was detected or bridged;
+            # the marker says so rather than implying a sighting.
+            current_predicted = bool(tracker.point_is_predicted
+                                     and tracker.point_is_predicted[-1])
+            frame = visualizer.draw(frame, traj, vels, det_full, 0,
+                                    current_is_predicted=current_predicted)
             # --- YOLO debug: draw bounding box + confidence ----------------
             if mode != "classic" and hasattr(detector, "yolo") and detector.yolo:
                 yd = detector.yolo
@@ -394,6 +404,10 @@ def main():
             elif key == ord("m"):
                 visualizer.show_minimap = not visualizer.show_minimap
                 ui.toast(f"Minimap {'ON' if visualizer.show_minimap else 'OFF'}")
+            elif key == ord("p"):
+                visualizer.style = ("point" if visualizer.style == "trail"
+                                    else "trail")
+                ui.toast(f"Style: {visualizer.style}")
             elif key == ord("h"):
                 show_hud = not show_hud
                 ui.toast(f"HUD {'ON' if show_hud else 'OFF'}")
@@ -479,6 +493,7 @@ def main():
         # Save configuration before exit
         config.set("smoothing", tracker.smoothing)
         config.set("show_minimap", visualizer.show_minimap)
+        config.set("style", visualizer.style)
         config.set("trail_opacity", visualizer.trail_opacity)
         config.save()
 

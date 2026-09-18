@@ -51,6 +51,10 @@ class TrajectoryVisualizer:
         self.minimap_w = 214  # ~2:1 aspect, mini court
         self.theme = Theme.DARK
         self.trail_opacity = 0.8
+        # "trail" draws the whole tracked path; "point" draws only where the
+        # shuttle is now. See draw() for why point mode still wants the
+        # tracker's gap filling underneath it.
+        self.style = "trail"
 
     def set_theme(self, theme_name):
         """Set the color theme (dark or light)."""
@@ -61,8 +65,27 @@ class TrajectoryVisualizer:
 
     # ------------------------------------------------------------------- draw
     def draw(self, frame, trajectory, velocities=None, current_point=None,
-             hit_flash=0):
-        """Draw trajectory on frame. `hit_flash` > 0 paints a brief flash."""
+             hit_flash=0, current_is_predicted=False):
+        """Draw trajectory on frame. `hit_flash` > 0 paints a brief flash.
+
+        In "point" style only the current position is drawn. On broadcast
+        footage the full trail is a long streak across the frame — much of it
+        extrapolated through gaps — and it reads as clutter over the very
+        thing it is pointing at.
+
+        Point style still relies on the tracker filling short gaps. Measured
+        on clip_01, a marker drawn only on real TrackNet detections is present
+        for 61% of in-play frames; with gap filling it is present for 86%.
+        Most dropouts are one or two frames (40-80 ms) and invisible at speed,
+        but the longest runs half a second, so `current_is_predicted` draws a
+        hollow marker: the overlay never asserts a sighting it does not have.
+        """
+        if self.style == "point":
+            if current_point is not None:
+                self._draw_marker(frame, current_point, current_is_predicted)
+            self._draw_hit_flash(frame, hit_flash)
+            return frame
+
         overlay = frame.copy()
 
         # --- Trail with glow + speed coloring --------------------------------
@@ -98,20 +121,34 @@ class TrajectoryVisualizer:
 
         # --- Current position marker ----------------------------------------
         if current_point is not None:
-            cv2.circle(frame, current_point, self.point_radius + 4, (0, 0, 255), 2)
-            cv2.circle(frame, current_point, self.point_radius, (0, 0, 255), -1)
-            cv2.circle(frame, current_point, max(1, self.point_radius - 3),
-                       (255, 255, 255), -1)
+            self._draw_marker(frame, current_point, current_is_predicted)
 
-        # --- Hit flash -------------------------------------------------------
-        if hit_flash > 0:
-            alpha = min(0.4, hit_flash * 0.1)
-            flash = np.full_like(frame, (255, 255, 255), dtype=np.uint8)
-            cv2.addWeighted(flash, alpha, frame, 1 - alpha, 0, frame)
-            cv2.putText(frame, "HIT!", (frame.shape[1] // 2 - 40, 80),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1.4, (0, 0, 255), 4)
-
+        self._draw_hit_flash(frame, hit_flash)
         return frame
+
+    def _draw_marker(self, frame, point, is_predicted):
+        """The "shuttle is here" marker.
+
+        Hollow when the position came from the motion model rather than a
+        detection, so a bridged gap is visibly a guess.
+        """
+        if is_predicted:
+            cv2.circle(frame, point, self.point_radius + 4, (0, 0, 255), 1)
+            cv2.circle(frame, point, self.point_radius, (255, 255, 255), 1)
+            return
+        cv2.circle(frame, point, self.point_radius + 4, (0, 0, 255), 2)
+        cv2.circle(frame, point, self.point_radius, (0, 0, 255), -1)
+        cv2.circle(frame, point, max(1, self.point_radius - 3),
+                   (255, 255, 255), -1)
+
+    def _draw_hit_flash(self, frame, hit_flash):
+        if hit_flash <= 0:
+            return
+        alpha = min(0.4, hit_flash * 0.1)
+        flash = np.full_like(frame, (255, 255, 255), dtype=np.uint8)
+        cv2.addWeighted(flash, alpha, frame, 1 - alpha, 0, frame)
+        cv2.putText(frame, "HIT!", (frame.shape[1] // 2 - 40, 80),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.4, (0, 0, 255), 4)
 
     # ------------------------------------------------------------------- HUD
     def draw_info(self, frame, trajectory_length, fps=0, rally=0, hits=0,
@@ -157,7 +194,7 @@ class TrajectoryVisualizer:
 
         # Split controls into multiple lines if window is narrow
         if w < 1100:
-            controls_line1 = "[c] clear  [r] reset  [m] minimap  [h] HUD  [q] quit"
+            controls_line1 = "[c] clear  [r] reset  [m] minimap  [p] point  [h] HUD  [q] quit"
             controls_line2 = "[+/-] bright  [,/.] smooth  [s] snap  [d] debug"
             cv2.rectangle(frame, (0, h - 56), (w, h), self.theme["hud_bg"], -1)
             cv2.putText(frame, controls_line1, (12, h - 34), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
@@ -165,7 +202,7 @@ class TrajectoryVisualizer:
             cv2.putText(frame, controls_line2, (12, h - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
                         self.theme["text"], 1)
         else:
-            controls = "[c] clear  [r] reset  [m] minimap  [+/-] bright  [,/.] smooth  [s] snap  [d] debug  [q] quit"
+            controls = "[c] clear  [r] reset  [m] minimap  [p] point  [+/-] bright  [,/.] smooth  [s] snap  [q] quit"
             cv2.putText(frame, controls, (12, h - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
                         self.theme["text"], 1)
         return frame

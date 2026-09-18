@@ -58,6 +58,9 @@ def main():
     ap.add_argument("--model", default=None, help="TrackNet weights path.")
     ap.add_argument("--trail", type=int, default=30,
                     help="Trail length in points.")
+    ap.add_argument("--style", choices=("trail", "point"), default="trail",
+                    help="Overlay style: the full trail, or just a marker on "
+                         "the shuttle.")
     args = ap.parse_args()
 
     cap = cv2.VideoCapture(args.input)
@@ -80,6 +83,7 @@ def main():
     # can be told the truth instead of estimating it from wall-clock time.
     tracker.observed_fps = fps
     visualizer = TrajectoryVisualizer()
+    visualizer.style = args.style
 
     writer = cv2.VideoWriter(args.output, cv2.VideoWriter_fourcc(*"mp4v"),
                              fps, (width, height))
@@ -111,8 +115,10 @@ def main():
         trajectory = [(int(x * inv_scale), int(y * inv_scale))
                       for x, y in tracker.get_trajectory()]
         current = trajectory[-1] if trajectory else None
+        predicted = bool(tracker.point_is_predicted
+                         and tracker.point_is_predicted[-1])
         visualizer.draw(frame, trajectory, tracker.get_velocities(),
-                        current_point=current)
+                        current_point=current, current_is_predicted=predicted)
         visualizer.draw_info(frame, len(trajectory), fps=fps,
                              rally=tracker.rally_count,
                              hits=tracker.hit_count,

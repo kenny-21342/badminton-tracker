@@ -313,6 +313,7 @@ python3 main_screen.py --tracknet --tracknet-input 256x144 --tracknet-fp16  # Tr
 | `c` | Clear the trajectory (new rally) | all |
 | `r` | Reset the rally counter to 0 | all |
 | `m` | Toggle the mini-map | all |
+| `p` | Trail ↔ point overlay | all |
 | `h` | Toggle the HUD bars | all |
 | `s` | Toggle smoothing level (0.2 / 0.6) | all |
 | `v` | **Start / stop recording the session** (writes JSON to `sessions/`) | all |
@@ -451,6 +452,27 @@ Press **`d`** to open the debug masks window (frame | white | motion | AND).
 3. **Hybrid fallback** — if TrackNet's heatmap confidence is low, the classic
    CV detector fills the gap automatically.
 4. **Track + Visualize** — identical to classic mode.
+
+### Overlay style: trail or point
+
+`p` toggles, `--style point` starts there. The trail draws the whole tracked
+path; point draws only where the shuttle is now.
+
+On broadcast footage the trail is a long streak across the frame, much of it
+extrapolated through gaps, sitting on top of the thing it points at. The point
+is far more legible. What makes it workable is that it still uses the tracker's
+gap filling: measured on `clip_01`, a marker drawn only on real TrackNet
+detections is present for **61%** of in-play frames, while gap filling carries
+it to **86%**.
+
+Dropouts are mostly invisible — 10 of 17 last one or two frames (40–80 ms) —
+but the tail is real, up to 13 frames (520 ms). So a bridged position is drawn
+**hollow** and a real detection **solid**: the overlay never asserts a sighting
+it does not have.
+
+This changes what you see, not what is counted. Hit detection and rally stats
+read the trajectory, so recall still matters for the numbers even when the
+display no longer looks gappy.
 
 ## Limitations
 
